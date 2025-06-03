@@ -74,14 +74,34 @@ def ls(
                     rprint(f"[yellow]Warning: Unknown column '{col}'. Available columns: {', '.join(column_map.keys())}[/yellow]")
     
     if service.lower() == 'ec2':
-        try:
-            # Show which credentials we're using
+        # Check credentials first
+        has_creds, account_id, error = aws_session.check_credentials()
+        
+        if has_creds and account_id:
+            # Working credentials
             credential_source = aws_session.detect_credential_source()
-            account_id = aws_session.get_current_account()
-            if account_id:
-                rprint(f"[dim]Using {credential_source} (Account: {account_id})[/dim]")
-            
-            # Run the async function
+            rprint(f"[dim]Using {credential_source} (Account: {account_id})[/dim]")
+        elif has_creds and error:
+            # Credentials exist but are invalid/expired  
+            rprint(f"[red]Error: {error}[/red]")
+            help_messages = aws_session.get_credential_help(error)
+            if help_messages:
+                rprint("")
+                for message in help_messages:
+                    rprint(message)
+            raise typer.Exit(1)
+        else:
+            # No credentials
+            rprint("[red]No AWS credentials found[/red]")
+            help_messages = aws_session.get_credential_help(Exception("NoCredentialsError"))
+            if help_messages:
+                rprint("")
+                for message in help_messages:
+                    rprint(message)
+            raise typer.Exit(1)
+        
+        # Run the async function (only if credentials are working)
+        try:
             instances = asyncio.run(list_ec2_instances(
                 regions=regions,
                 all_regions=all_regions,
@@ -164,6 +184,71 @@ def version():
                 
     except Exception as e:
         rprint(f"[red]Error checking AWS context: {e}[/red]")
+
+
+@app.command()
+def test():
+    """Test AWS connectivity and credentials"""
+    rprint("[bold cyan]Testing AWS connectivity...[/bold cyan]")
+    
+    try:
+        # Test credential detection
+        has_creds, account_id, error = aws_session.check_credentials()
+        
+        if has_creds and account_id:
+            credential_source = aws_session.detect_credential_source()
+            rprint(f"✅ Credentials working: {credential_source}")
+            rprint(f"✅ Account ID: {account_id}")
+            
+            # Test region detection
+            import boto3
+            session = boto3.Session()
+            region = session.region_name or 'us-east-1'
+            rprint(f"✅ Default region: {region}")
+            
+            # Test EC2 permissions
+            rprint("\nTesting EC2 permissions...")
+            try:
+                import asyncio
+                responses = asyncio.run(aws_session.call_service_async(
+                    'ec2', 
+                    'describe_instances',
+                    regions=[region]
+                ))
+                
+                if responses:
+                    instance_count = sum(
+                        len(reservation['Instances']) 
+                        for response in responses.values() 
+                        for reservation in response.get('Reservations', [])
+                    )
+                    rprint(f"✅ EC2 API access working - found {instance_count} instances in {region}")
+                else:
+                    rprint(f"✅ EC2 API access working - no instances in {region}")
+                    
+            except Exception as e:
+                rprint(f"❌ EC2 API error: {e}")
+                help_messages = aws_session.get_credential_help(e)
+                if help_messages:
+                    rprint("")
+                    for message in help_messages:
+                        rprint(message)
+            
+        elif has_creds and error:
+            rprint(f"❌ Credentials found but invalid: {error}")
+            help_messages = aws_session.get_credential_help(error)
+            if help_messages:
+                rprint("")
+                for message in help_messages:
+                    rprint(message)
+        else:
+            rprint("❌ No AWS credentials found")
+            help_messages = aws_session.get_credential_help(Exception("NoCredentialsError"))
+            for message in help_messages:
+                rprint(message)
+                
+    except Exception as e:
+        rprint(f"❌ Unexpected error: {e}")
 
 
 if __name__ == "__main__":
