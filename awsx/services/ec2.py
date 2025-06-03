@@ -106,10 +106,14 @@ async def list_ec2_instances(
     """List EC2 instances across regions with optional filters"""
     
     # Determine regions to query
-    if all_regions:
+    if regions:
+        # User specified specific regions - use those
+        pass
+    elif all_regions:
+        # User wants all regions (default behavior)
         regions = aws_session.get_available_regions('ec2')
-    elif not regions:
-        # Default to current region (try to detect from session)
+    else:
+        # User wants current region only (--no-all-regions)
         try:
             import boto3
             session = boto3.Session()
