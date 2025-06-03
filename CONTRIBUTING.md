@@ -103,4 +103,8 @@ These guidelines apply to:
 - All pull requests
 - All contributor submissions
 
-Commits that don't follow these standards may be rejected or require amendments. 
+Commits that don't follow these standards may be rejected or require amendments.
+
+### Commit History
+
+We maintain a clean, professional commit history. All future commits must follow these guidelines to ensure the repository maintains enterprise-grade standards. 
