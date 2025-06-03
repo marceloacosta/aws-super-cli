@@ -23,20 +23,34 @@ def format_cost_amount(amount: str) -> str:
 
 
 def get_date_range(days: int = 30) -> tuple[str, str]:
-    """Get date range for cost analysis"""
+    """Get date range for cost analysis
+    
+    Note: Cost Explorer API treats end dates as EXCLUSIVE
+    So to get full months, end date should be first day of next period
+    """
     # End date should be yesterday (Cost Explorer has 1-2 day delay)
     end_date = (datetime.now() - timedelta(days=1)).date()
     start_date = end_date - timedelta(days=days-1)
-    return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
+    
+    # Make end_date exclusive by adding 1 day
+    # This ensures we include the full period up to end_date
+    end_date_exclusive = end_date + timedelta(days=1)
+    
+    return start_date.strftime('%Y-%m-%d'), end_date_exclusive.strftime('%Y-%m-%d')
 
 
 def get_current_month_range() -> tuple[str, str]:
-    """Get current month date range"""
+    """Get current month date range with proper exclusive end date"""
     now = datetime.now()
     start_of_month = now.replace(day=1).date()
-    # End date should be yesterday for Cost Explorer
+    
+    # End date should be yesterday for Cost Explorer (with data delay)
     end_date = (now - timedelta(days=1)).date()
-    return start_of_month.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
+    
+    # Make end_date exclusive by adding 1 day
+    end_date_exclusive = end_date + timedelta(days=1)
+    
+    return start_of_month.strftime('%Y-%m-%d'), end_date_exclusive.strftime('%Y-%m-%d')
 
 
 async def get_current_month_costs(debug: bool = False) -> Dict[str, str]:
