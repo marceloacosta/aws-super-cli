@@ -117,9 +117,7 @@ def ls(
                     regions=regions_to_query,
                     all_regions=all_regions,
                     match=match,
-                    state=state,
-                    instance_type=instance_type,
-                    tag=tag
+                    state=state
                 ))
                 
             # Apply filters
@@ -512,14 +510,16 @@ def version():
         
         if has_creds and account_id:
             # Working credentials
-            credential_source = aws_session.get_credential_source()
-            region = aws_session.get_current_region()
+            credential_source = aws_session.detect_credential_source()
+            
+            # Test region detection  
+            import boto3
+            session = boto3.Session()
+            region = session.region_name or 'us-east-1'
             
             rprint(f"✅ Credentials working: {credential_source}")
             rprint(f"✅ Account ID: {account_id}")
-            
-            if region:
-                rprint(f"✅ Default region: {region}")
+            rprint(f"✅ Default region: {region}")
             
             # Test basic AWS access
             try:
