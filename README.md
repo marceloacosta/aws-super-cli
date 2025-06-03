@@ -29,8 +29,11 @@ awsx ls ec2 --all-accounts
 # Find production resources across all accounts
 awsx ls ec2 --all-accounts --match prod
 
-# List RDS instances with specific engine
-awsx ls rds --engine postgres
+# Analyze AWS costs
+awsx cost summary
+
+# See top spending services
+awsx cost top-spend --days 30
 
 # See available AWS profiles
 awsx accounts
@@ -47,6 +50,31 @@ awsx accounts
 | Lambda | `ls lambda` | `--runtime` |
 | ELB | `ls elb` | `--type` |
 | IAM | `ls iam` | `--iam-type` |
+
+## Cost Analysis
+
+awsx includes powerful cost analysis features using AWS Cost Explorer:
+
+```bash
+# Cost summary with trends
+awsx cost summary --days 30
+
+# Top spending services
+awsx cost top-spend --limit 10
+
+# Costs by account (multi-account setups)
+awsx cost by-account
+
+# Daily cost trends
+awsx cost daily
+```
+
+**Cost features:**
+- Total spending and daily averages
+- Cost trends with percentage changes
+- Service-level cost breakdown
+- Multi-account cost analysis
+- Daily cost tracking
 
 ## Multi-Account Support
 
@@ -86,6 +114,11 @@ awsx ls rds --engine postgres --all-accounts
 **Security audit - find resources matching pattern:**
 ```bash
 awsx ls ec2 --all-accounts --match "public\|dmz"
+```
+
+**Cost optimization - find top spending services:**
+```bash
+awsx cost top-spend --days 7 --limit 5
 ```
 
 ## Output Format
@@ -137,18 +170,19 @@ awsx ls ec2 --tag "Environment=prod"
 
 ## Why awsx vs alternatives?
 
-| Tool | Multi-Account | Rich Output | AWS Native |
-|------|---------------|-------------|------------|
-| AWS CLI v2 | Manual switching | JSON only | Yes |
-| awsx | Automatic parallel | Rich tables | Yes |
-| Steampipe | Complex setup | SQL required | Yes |
-| aws-vault | Credential helper | No listing | Partial |
+| Tool | Multi-Account | Rich Output | Cost Analysis | AWS Native |
+|------|---------------|-------------|---------------|------------|
+| AWS CLI v2 | Manual switching | JSON only | No | Yes |
+| awsx | Automatic parallel | Rich tables | Yes | Yes |
+| Steampipe | Complex setup | SQL required | Limited | Yes |
+| aws-vault | Credential helper | No listing | No | Partial |
 
 ## Requirements
 
 - Python 3.8+
 - Valid AWS credentials
 - Required permissions: `ec2:Describe*`, `s3:List*`, `rds:Describe*`, `lambda:List*`, `elasticloadbalancing:Describe*`, `iam:List*`, `sts:GetCallerIdentity`
+- For cost analysis: `ce:GetCostAndUsage`, `ce:GetDimensionValues`
 
 ## Contributing
 
@@ -164,8 +198,8 @@ Apache 2.0
 
 ## Roadmap
 
-- Cost analysis commands
 - Security audit commands  
 - Plugin system for custom services
 - Export to JSON/CSV
 - Real-time resource monitoring
+- Cost optimization recommendations

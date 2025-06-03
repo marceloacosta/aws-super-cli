@@ -8,6 +8,7 @@ from rich import print as rprint
 
 from .services import ec2, s3, vpc, rds, elb, iam
 from .services import lambda_
+from .services import cost as cost_analysis
 from .aws import aws_session
 
 app = typer.Typer(help="AWS Super CLI – one-command resource visibility")
@@ -283,6 +284,110 @@ def ls(
 
 
 @app.command()
+def cost(
+    command: str = typer.Argument(..., help="Cost command (top-spend, by-account, daily, summary)"),
+    days: int = typer.Option(30, "--days", "-d", help="Number of days to analyze (default: 30)"),
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of results to show (default: 10)"),
+):
+    """Analyze AWS costs and spending patterns"""
+    command_lower = command.lower()
+    
+    try:
+        if command_lower == "top-spend":
+            console.print(f"[cyan]Analyzing top spending services for the last {days} days...[/cyan]")
+            
+            services_cost = asyncio.run(cost_analysis.get_cost_by_service(days=days, limit=limit))
+            if not services_cost:
+                console.print("[yellow]No cost data available. Check permissions and try again.[/yellow]")
+                return
+            
+            table = cost_analysis.create_cost_table(
+                services_cost, 
+                f"Top {len(services_cost)} AWS Services by Cost (Last {days} days)"
+            )
+            console.print(table)
+            
+            total_shown = sum(item['Raw_Cost'] for item in services_cost)
+            console.print(f"\n[green]Total cost shown: {cost_analysis.format_cost_amount(str(total_shown))}[/green]")
+            
+        elif command_lower == "by-account":
+            console.print(f"[cyan]Analyzing costs by account for the last {days} days...[/cyan]")
+            
+            accounts_cost = asyncio.run(cost_analysis.get_cost_by_account(days=days))
+            if not accounts_cost:
+                console.print("[yellow]No account cost data available.[/yellow]")
+                return
+            
+            table = cost_analysis.create_cost_table(
+                accounts_cost[:limit], 
+                f"AWS Costs by Account (Last {days} days)"
+            )
+            console.print(table)
+            
+            total_shown = sum(item['Raw_Cost'] for item in accounts_cost[:limit])
+            console.print(f"\n[green]Total cost shown: {cost_analysis.format_cost_amount(str(total_shown))}[/green]")
+            
+        elif command_lower == "daily":
+            console.print("[cyan]Analyzing daily cost trends...[/cyan]")
+            
+            daily_costs = asyncio.run(cost_analysis.get_daily_costs(days=days))
+            if not daily_costs:
+                console.print("[yellow]No daily cost data available.[/yellow]")
+                return
+            
+            table = cost_analysis.create_cost_table(
+                daily_costs, 
+                "Daily Cost Trend (Last 7 days)"
+            )
+            console.print(table)
+            
+            if len(daily_costs) >= 2:
+                yesterday_cost = daily_costs[-1]['Raw_Cost']
+                day_before_cost = daily_costs[-2]['Raw_Cost']
+                change = yesterday_cost - day_before_cost
+                if change > 0:
+                    console.print(f"[yellow]Daily cost increased by {cost_analysis.format_cost_amount(str(change))}[/yellow]")
+                elif change < 0:
+                    console.print(f"[green]Daily cost decreased by {cost_analysis.format_cost_amount(str(abs(change)))}[/green]")
+                else:
+                    console.print("[blue]Daily cost remained stable[/blue]")
+                    
+        elif command_lower == "summary":
+            console.print(f"[cyan]Getting cost summary for the last {days} days...[/cyan]")
+            
+            summary = asyncio.run(cost_analysis.get_cost_summary(days=days))
+            
+            console.print("\n[bold]Cost Summary[/bold]")
+            console.print(f"Period: {summary['period']}")
+            console.print(f"Total Cost: [green]{summary['total_cost']}[/green]")
+            console.print(f"Daily Average: [blue]{summary['daily_avg']}[/blue]")
+            console.print(f"Trend: {summary['trend']}")
+            
+        else:
+            console.print(f"[red]Unknown cost command: {command}[/red]")
+            console.print("\n[bold]Available commands:[/bold]")
+            console.print("  awsx cost top-spend      # Show top spending services")
+            console.print("  awsx cost by-account     # Show costs by account")
+            console.print("  awsx cost daily          # Show daily cost trends")
+            console.print("  awsx cost summary        # Show overall cost summary")
+            console.print("\n[bold]Options:[/bold]")
+            console.print("  --days 7                 # Analyze last 7 days")
+            console.print("  --limit 5                # Show top 5 results")
+            
+    except Exception as e:
+        console.print(f"[red]Error analyzing costs: {e}[/red]")
+        help_messages = aws_session.get_credential_help(e)
+        if help_messages:
+            console.print("")
+            for message in help_messages:
+                console.print(message)
+        console.print("\n[yellow]Note: Cost analysis requires Cost Explorer permissions:[/yellow]")
+        console.print("  • ce:GetCostAndUsage")
+        console.print("  • ce:GetDimensionValues")
+        raise typer.Exit(1)
+
+
+@app.command()
 def version():
     """Show awsx version and current AWS context"""
     from . import __version__
@@ -456,6 +561,7 @@ def accounts():
             console.print("\n[bold]Multi-account usage examples:[/bold]")
             console.print("  awsx ls ec2 --all-accounts           # Query all accessible accounts")
             console.print("  awsx ls s3 --accounts prod-*         # Query accounts matching pattern")
+            console.print("  awsx cost top-spend                  # Analyze costs across accounts")
             
             # Show example with actual profile names
             example_profiles = [acc['profile'] for acc in accessible_accounts[:2]]
