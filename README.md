@@ -1,87 +1,82 @@
 # AWS Super CLI (awsx)
 
-See your AWS empire in one command—beautiful, fast, across all accounts with **revolutionary cost and credit analysis**.
+Multi-account AWS resource discovery with advanced cost analysis and service-level credit tracking.
 
 ## What is awsx?
 
-awsx is the most comprehensive AWS cost and resource discovery tool ever built. While other tools struggle with basic resource listing, awsx gives you:
+awsx is a command-line tool for AWS resource discovery and cost analysis across multiple accounts. It solves two key problems:
 
-🔥 **Multi-account resource discovery** across 7 AWS services  
-💰 **Advanced cost analysis** with gross/net cost separation  
-💳 **Revolutionary credit tracking** showing exactly where your credits go  
-📊 **Trend analysis** with daily patterns and monthly forecasting  
-🚀 **Production-ready speed** with parallel account queries  
+1. **Multi-account resource visibility** - Query resources across all your AWS accounts in parallel
+2. **Cost transparency** - Separate actual costs from credit-subsidized costs with service-level breakdown
 
-**Game-changing differentiator**: The only tool that shows **credit usage by service** - see exactly which AWS services consume your promotional credits and at what percentage coverage.
+Unlike the AWS CLI which requires manual profile switching and outputs verbose JSON, awsx provides clean tables and can query multiple accounts simultaneously.
+
+**Unique feature**: Service-level credit usage analysis - see exactly which AWS services consume your promotional credits and at what percentage.
 
 ## Installation
 
 ```bash
-# Install from PyPI (recommended)
 pip install awsx
-
-# Or install from source
-git clone https://github.com/marceloacosta/awsx.git
-cd awsx
-pip install .
 ```
 
 ## Quick Start
 
 ```bash
-# Complete cost overview with credit analysis
+# List EC2 instances across all accounts
+awsx ls ec2 --all-accounts
+
+# Cost analysis
 awsx cost summary
-
-# See which services are eating your credits
 awsx cost credits-by-service
-
-# Find expensive resources across all accounts
-awsx ls ec2 --all-accounts --match prod
-
-# Track current month spending (matches AWS console exactly)
-awsx cost month
 
 # See available AWS profiles
 awsx accounts
 ```
 
-## Cost & Credit Analysis 💰
+## Cost Analysis
 
-The most advanced AWS cost analysis system available:
+awsx provides comprehensive cost analysis using AWS Cost Explorer API:
 
-### Core Cost Commands
-
-```bash
-# Complete financial overview
-awsx cost summary                    # Gross/net costs, trends, credit impact
-
-# Service breakdown  
-awsx cost top-spend                  # Top spending services (without credits)
-awsx cost with-credits               # Top spending services (after credits)
-
-# Time-based analysis
-awsx cost month                      # Current month (matches AWS console)
-awsx cost daily --days 7             # Daily trends and cost spikes
-
-# Multi-account analysis
-awsx cost by-account                 # Costs across multiple AWS accounts
-```
-
-### Revolutionary Credit Analysis 💳
-
-**World's first** service-level credit breakdown:
+### Basic Cost Commands
 
 ```bash
-# Credit usage patterns and trends
-awsx cost credits                    # 3-month credit usage trends, burn rate
-
-# Service-level credit breakdown  
-awsx cost credits-by-service         # Which services consume most credits
+awsx cost summary                # Overview with trends and credit breakdown
+awsx cost top-spend              # Top spending services (gross costs)
+awsx cost with-credits           # Top spending services (net costs after credits)
+awsx cost month                  # Current month costs (matches AWS console)
+awsx cost daily --days 7         # Daily cost trends
+awsx cost by-account             # Multi-account cost breakdown
 ```
 
-**Sample Credit Analysis Output:**
+### Credit Analysis
+
+```bash
+awsx cost credits               # Credit usage trends and burn rate
+awsx cost credits-by-service    # Service-level credit breakdown
 ```
-💳 Top Services by Credit Usage (Last 30 days)
+
+### Key Features
+
+- **Gross vs Net costs**: Separate "what you'd pay" from "what you actually pay"
+- **Console accuracy**: Matches AWS Billing console exactly (fixes API/console discrepancy)
+- **Credit transparency**: See exactly where promotional credits are applied
+- **Service-level breakdown**: Which services consume most credits with coverage percentages
+- **Trend analysis**: Historical patterns and monthly forecasting
+
+### Example Output
+
+```
+💰 Cost Summary
+Period: Last 30 days
+Gross Cost (without credits): $665.75
+Net Cost (with credits):      $-0.05
+Credits Applied:              $665.79
+Daily Average (gross):        $22.19
+Trend: ↗ +123.7%
+```
+
+```
+Top Services by Credit Usage
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
 ┃ Service                                ┃   Gross Cost ┃ Credits Applied ┃     Net Cost ┃  Coverage  ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
@@ -89,34 +84,23 @@ awsx cost credits-by-service         # Which services consume most credits
 │ Amazon Elastic Compute Cloud - Compute │       $89.65 │          $89.65 │        $0.00 │   100.0%   │
 │ Amazon Virtual Private Cloud           │       $83.05 │          $83.05 │        $0.00 │   100.0%   │
 └────────────────────────────────────────┴──────────────┴─────────────────┴──────────────┴────────────┘
-
-💯 Services with >90% credit coverage: RDS, EC2, VPC
 ```
-
-### Cost Intelligence Features
-
-✅ **Gross vs Net Costs**: See both "what you'd pay" vs "what you actually pay"  
-✅ **Credit Transparency**: Exact credit usage by service with coverage percentages  
-✅ **Trend Analysis**: Monthly consumption patterns and daily variations  
-✅ **Console Accuracy**: Matches AWS Billing console exactly (credits filter fix)  
-✅ **Budget Planning**: Separate planning costs from actual cash flow  
-✅ **Multi-Account**: Cost analysis across multiple AWS accounts  
 
 ## Supported Services
 
 | Service | Command | Multi-Account | Filters |
 |---------|---------|---------------|---------|
-| EC2 | `ls ec2` | ✅ | `--state`, `--instance-type`, `--tag` |
-| S3 | `ls s3` | ➖ | `--match` |
-| VPC | `ls vpc` | ➖ | `--match` |
-| RDS | `ls rds` | ➖ | `--engine` |
-| Lambda | `ls lambda` | ➖ | `--runtime` |
-| ELB | `ls elb` | ➖ | `--type` |
-| IAM | `ls iam` | ➖ | `--iam-type` |
+| EC2 | `awsx ls ec2` | ✅ | `--state`, `--instance-type`, `--tag` |
+| S3 | `awsx ls s3` | | `--match` |
+| VPC | `awsx ls vpc` | | `--match` |
+| RDS | `awsx ls rds` | | `--engine` |
+| Lambda | `awsx ls lambda` | | `--runtime` |
+| ELB | `awsx ls elb` | | `--type` |
+| IAM | `awsx ls iam` | | `--iam-type` |
 
 ## Multi-Account Support
 
-awsx automatically discovers AWS profiles and can query multiple accounts in parallel:
+awsx automatically discovers AWS profiles and queries them in parallel:
 
 ```bash
 # Query all accessible accounts
@@ -128,191 +112,116 @@ awsx ls s3 --accounts "prod-account,staging-account"
 # Pattern matching
 awsx ls rds --accounts "prod-*"
 
-# List available profiles and test access
+# List available profiles
 awsx accounts
 ```
 
-## Real-World Examples
+## Usage Examples
 
-### Cost Management
-
-**Monthly financial review:**
+**Resource discovery:**
 ```bash
-awsx cost summary                    # Overview with trends
-awsx cost month                      # Current month tracking
-awsx cost credits                    # Credit burn rate analysis
-```
+# Find all running production instances
+awsx ls ec2 --all-accounts --state running --match prod
 
-**Cost optimization research:**
-```bash
-awsx cost top-spend --days 7         # Find weekly cost drivers
-awsx cost credits-by-service         # See credit-subsidized services
-awsx cost daily --days 30            # Spot cost anomalies
-```
-
-**Budget planning session:**
-```bash
-awsx cost summary --days 90          # Quarterly cost trends
-awsx cost by-account                 # Multi-account breakdown
-```
-
-### Resource Discovery
-
-**Security audit across accounts:**
-```bash
-awsx ls ec2 --all-accounts --match "public\|dmz"
+# Audit IAM users across production accounts
 awsx ls iam --accounts "prod-*" --iam-type users
-```
 
-**Architecture inventory:**
-```bash
+# Find PostgreSQL databases
 awsx ls rds --engine postgres --all-accounts
-awsx ls lambda --runtime python --all-accounts
 ```
 
-**Cost-focused resource review:**
+**Cost analysis:**
 ```bash
-# Find expensive running instances
-awsx ls ec2 --all-accounts --state running --instance-type "m5.*\|c5.*"
+# Monthly financial review
+awsx cost summary
+awsx cost month
+awsx cost credits
+
+# Cost optimization research
+awsx cost top-spend --days 7
+awsx cost credits-by-service
+awsx cost daily --days 30
+
+# Multi-account cost breakdown
+awsx cost by-account
 ```
 
-## Revolutionary Credit Insights
+## Why awsx?
 
-### Credit Usage Patterns 📈
+| Feature | AWS CLI v2 | awsx | Other Tools |
+|---------|------------|------|-------------|
+| Multi-account queries | Manual switching | Automatic parallel | Varies |
+| Output format | JSON only | Rich tables | Varies |
+| Cost analysis | None | Advanced | Basic |
+| Credit tracking | None | Service-level | None |
+| Setup complexity | Medium | Zero config | High |
 
-```bash
-💳 AWS Credits Analysis
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Metric                    ┃ Value                ┃ Notes                                              ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ Total Credits (3 months)  │ $996.82              │ Credits consumed in analysis period               │
-│ Average Monthly Usage     │ $489.66              │ Based on complete months only                     │
-│ Current Month Usage       │ $17.51               │ Month-to-date credit consumption                  │
-│ Projected Month Total     │ $175.10              │ Estimated total for current month                 │
-└───────────────────────────┴──────────────────────┴────────────────────────────────────────────────────┘
+**awsx is the only tool that provides service-level credit usage analysis.**
 
-📈 Monthly Credit Usage Trend
-  2025-04: $293.40 credits applied
-  2025-05: $685.91 credits applied  ← Peak usage month
-  2025-06: $17.51 credits applied   ← Current month projection
-```
+## Technical Details
 
-### Business Value
+### Cost Explorer Integration
 
-🎯 **For Finance Teams:**
-- **Budget Accuracy**: Separate gross costs (for budgeting) from net costs (for cash flow)
-- **Credit Runway**: Track promotional credit consumption rates
-- **Vendor Negotiations**: Understand true AWS usage patterns
+awsx fixes a major discrepancy between AWS Cost Explorer API and the AWS Console. The console excludes credits by default, but the API includes them, causing confusion. awsx handles this correctly and provides both views.
 
-💡 **For Engineering Teams:**  
-- **Cost Optimization**: Identify highest-impact services for optimization
-- **Architecture Decisions**: Credit coverage analysis for service selection
-- **Resource Planning**: Daily cost trends for capacity planning
+### Multi-Account Architecture
 
-📊 **For Management:**
-- **Executive Dashboards**: Professional cost summaries with trends
-- **ROI Analysis**: Credit value vs. actual infrastructure investment
-- **Strategic Planning**: Consumption forecasting for AWS negotiations
+- Automatically discovers profiles from `~/.aws/config` and `~/.aws/credentials`
+- Executes API calls in parallel across accounts and regions
+- Handles AWS SSO, IAM roles, and standard credentials
+- Respects rate limits and implements proper error handling
 
-## Output Format
+### Performance
 
-Beautiful, professional tables that executives love:
-
-```
-💰 Cost Summary
-Period: Last 30 days
-Gross Cost (without credits): $665.75
-Net Cost (with credits):      $-0.05
-Credits Applied:              $665.79
-Daily Average (gross):        $22.19
-Daily Average (net):          <$0.01
-Trend: ↗ +123.7%
-```
-
-## Why awsx vs alternatives?
-
-| Tool | Multi-Account | Rich Output | Cost Analysis | Credit Analysis | AWS Native |
-|------|---------------|-------------|---------------|-----------------|------------|
-| AWS CLI v2 | Manual switching | JSON only | No | No | Yes |
-| **awsx** | **Automatic parallel** | **Rich tables** | **Advanced** | **Revolutionary** | **Yes** |
-| Steampipe | Complex setup | SQL required | Limited | No | Yes |
-| aws-vault | Credential helper | No listing | No | No | Partial |
-| Third-party tools | Varies | Varies | Basic | No | No |
-
-**awsx is the only tool with service-level credit analysis.**
+- Parallel API calls across accounts/regions
+- Efficient data aggregation and formatting
+- Minimal API requests (most resource listing is free)
+- Cost Explorer API usage: ~$0.01 per cost analysis command
 
 ## Configuration
 
-awsx uses your existing AWS configuration (`~/.aws/config` and `~/.aws/credentials`). It supports:
+awsx uses your existing AWS configuration. No additional setup required.
 
+Supports:
 - AWS profiles
-- AWS SSO  
+- AWS SSO
 - IAM roles
 - Environment variables
 - EC2 instance profiles
 
-**Zero additional configuration required.**
-
 ## Requirements
 
 - Python 3.8+
-- Valid AWS credentials
-- **Resource listing**: `ec2:Describe*`, `s3:List*`, `rds:Describe*`, `lambda:List*`, `elasticloadbalancing:Describe*`, `iam:List*`, `sts:GetCallerIdentity`
-- **Cost analysis**: `ce:GetCostAndUsage`, `ce:GetDimensionValues`
+- AWS credentials configured
+- Permissions:
+  - Resource listing: `ec2:Describe*`, `s3:List*`, `rds:Describe*`, `lambda:List*`, `elasticloadbalancing:Describe*`, `iam:List*`, `sts:GetCallerIdentity`
+  - Cost analysis: `ce:GetCostAndUsage`, `ce:GetDimensionValues`
 
-## Cost Information
+## API Costs
 
-### Tool Cost
-**awsx is completely free** - open source with Apache 2.0 license.
+| Operation | Cost | Commands |
+|-----------|------|----------|
+| Resource listing | Free | All `awsx ls` commands |
+| Cost Explorer API | $0.01/request | `awsx cost` commands |
 
-### AWS API Costs
-**Most operations are FREE:**
+Monthly cost estimate: $0.50-2.00 for typical usage.
 
-| Operation | Cost | Used By |
-|-----------|------|---------|
-| `describe_instances`, `list_buckets`, etc. | **FREE** | All `awsx ls` commands |
-| `sts:GetCallerIdentity` | **FREE** | Authentication |
-| Cost Explorer API | **$0.01 per request** | `awsx cost` commands |
+## Advanced Usage
 
-### Typical Usage Costs
+**Debugging:**
 ```bash
-# Resource listing (always free)
-awsx ls ec2 --all-accounts    # $0.00
-awsx ls s3 --all-regions      # $0.00
-
-# Cost analysis (minimal charges)
-awsx cost summary             # $0.01
-awsx cost credits             # $0.01  
-awsx cost top-spend           # $0.01
-```
-
-**Monthly cost estimate: $0.50-2.00** for typical usage
-
-The cost is **negligible compared to engineer time saved** - typically less than a cup of coffee per month while saving hours of manual AWS console work and providing insights unavailable anywhere else.
-
-## Advanced Features
-
-### Debugging & Troubleshooting
-```bash
-# Debug mode for API troubleshooting
 awsx cost summary --debug
 awsx ls ec2 --all-accounts --debug
-
-# Test AWS connectivity
 awsx test
 ```
 
-### Filtering & Search
+**Filtering:**
 ```bash
-# Fuzzy matching across names, tags, and other fields
-awsx ls ec2 --match "web"        # Finds "web-server", "webapp", etc.
+# Fuzzy matching
+awsx ls ec2 --match "web"
 
-# Specific filters for precise results
+# Specific filters
 awsx ls ec2 --state running --instance-type "t3.*"
-awsx ls rds --engine postgres
-awsx ls lambda --runtime python
-
-# Tag filtering
 awsx ls ec2 --tag "Environment=prod"
 
 # Time-based cost analysis
@@ -322,34 +231,17 @@ awsx cost summary --days 90
 
 ## Contributing
 
-Contributions welcome! We're especially interested in:
+Contributions welcome. Areas of interest:
 
 - Additional AWS service support
-- Enhanced cost analysis features  
+- Enhanced cost analysis features
 - Multi-account support for more services
 - Performance optimizations
-
-Please ensure your code:
-- Follows existing patterns in `/awsx/services/`
-- Includes appropriate error handling
-- Works with multi-account infrastructure
-- Maintains consistent table formatting
 
 ## License
 
 Apache 2.0
 
-## Roadmap
-
-- ✅ **Multi-account resource discovery**
-- ✅ **Revolutionary credit analysis**  
-- ✅ **Advanced cost intelligence**
-- 🔄 **Security audit commands**
-- 🔄 **Plugin system for custom services**
-- 🔄 **Export to JSON/CSV**
-- 🔄 **Real-time resource monitoring**
-- 🔄 **AI-powered cost optimization recommendations**
-
 ---
 
-**awsx** - The only AWS tool with revolutionary credit intelligence. See your AWS empire in one command. 🚀
+**awsx** - Multi-account AWS resource discovery with service-level cost intelligence.
