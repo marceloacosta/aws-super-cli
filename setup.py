@@ -10,7 +10,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
     requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
-    name="awsx",
+    name="aws-super-cli",
     version="0.1.0",
     author="Marcelo Acosta",
     author_email="your-email@example.com",

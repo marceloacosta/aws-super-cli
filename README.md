@@ -16,7 +16,7 @@ Unlike the AWS CLI which requires manual profile switching and outputs verbose J
 ## Installation
 
 ```bash
-pip install awsx
+pip install aws-super-cli
 ```
 
 ## Quick Start
