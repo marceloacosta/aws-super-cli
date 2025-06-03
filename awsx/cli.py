@@ -5,6 +5,7 @@ from rich.console import Console
 from rich import print as rprint
 
 from .services.ec2 import list_ec2_instances, create_ec2_table
+from .aws import aws_session
 
 app = typer.Typer(help="AWS Super CLI – one-command resource visibility")
 console = Console()
@@ -74,6 +75,12 @@ def ls(
     
     if service.lower() == 'ec2':
         try:
+            # Show which credentials we're using
+            credential_source = aws_session.detect_credential_source()
+            account_id = aws_session.get_current_account()
+            if account_id:
+                rprint(f"[dim]Using {credential_source} (Account: {account_id})[/dim]")
+            
             # Run the async function
             instances = asyncio.run(list_ec2_instances(
                 regions=regions,
@@ -97,16 +104,66 @@ def ls(
             
         except Exception as e:
             rprint(f"[red]Error listing EC2 instances: {e}[/red]")
-            # Show more helpful error messages
-            if "NoCredentialsError" in str(e):
-                rprint("[yellow]Tip: Configure AWS credentials using 'aws configure' or environment variables[/yellow]")
-            elif "UnauthorizedOperation" in str(e):
-                rprint("[yellow]Tip: Check your IAM permissions for EC2 describe operations[/yellow]")
+            
+            # Show helpful credential guidance
+            help_messages = aws_session.get_credential_help(e)
+            if help_messages:
+                rprint("")
+                for message in help_messages:
+                    rprint(message)
+            
             raise typer.Exit(1)
     
     else:
         rprint(f"[yellow]Service '{service}' not yet supported. Currently supported: ec2[/yellow]")
         rprint("[dim]Coming soon: s3, rds, lambda, and more![/dim]")
+
+
+@app.command()
+def version():
+    """Show awsx version and current AWS context"""
+    from . import __version__
+    
+    rprint(f"[bold cyan]awsx[/bold cyan] version {__version__}")
+    
+    # Show AWS context
+    try:
+        has_creds, account_id, error = aws_session.check_credentials()
+        
+        if has_creds and account_id:
+            # Working credentials
+            credential_source = aws_session.detect_credential_source()
+            rprint(f"[dim]AWS Context:[/dim]")
+            rprint(f"  Account: {account_id}")
+            rprint(f"  Credentials: {credential_source}")
+            
+            # Show current region
+            import boto3
+            session = boto3.Session()
+            region = session.region_name or 'us-east-1'
+            rprint(f"  Default Region: {region}")
+            
+        elif has_creds and error:
+            # Credentials exist but are invalid/expired
+            credential_source = aws_session.detect_credential_source()
+            rprint(f"[yellow]AWS credentials found ({credential_source}) but invalid/expired[/yellow]")
+            rprint(f"[red]Error: {error}[/red]")
+            rprint("")
+            
+            # Show helpful guidance
+            help_messages = aws_session.get_credential_help(error)
+            for message in help_messages:
+                rprint(message)
+        else:
+            # No credentials
+            rprint("[yellow]No AWS credentials configured[/yellow]")
+            rprint("")
+            help_messages = aws_session.get_credential_help(Exception("NoCredentialsError"))
+            for message in help_messages:
+                rprint(message)
+                
+    except Exception as e:
+        rprint(f"[red]Error checking AWS context: {e}[/red]")
 
 
 if __name__ == "__main__":
