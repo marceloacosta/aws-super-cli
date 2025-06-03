@@ -23,14 +23,14 @@ pip install aws-super-cli
 
 ```bash
 # List EC2 instances across all accounts
-awsx ls ec2 --all-accounts
+aws-super-cli ls ec2 --all-accounts
 
 # Get cost summary with credit analysis
-awsx cost summary
-awsx cost credits-by-service
+aws-super-cli cost summary
+aws-super-cli cost credits-by-service
 
 # List available AWS profiles
-awsx accounts
+aws-super-cli accounts
 ```
 
 ## Cost Analysis
@@ -40,19 +40,19 @@ AWS Super CLI provides comprehensive cost analysis using AWS Cost Explorer API:
 ### Basic Cost Commands
 
 ```bash
-awsx cost summary                # Overview with trends and credit breakdown
-awsx cost top-spend              # Top spending services (gross costs)
-awsx cost with-credits           # Top spending services (net costs after credits)
-awsx cost month                  # Current month costs (matches AWS console)
-awsx cost daily --days 7         # Daily cost trends
-awsx cost by-account             # Multi-account cost breakdown
+aws-super-cli cost summary                # Overview with trends and credit breakdown
+aws-super-cli cost top-spend              # Top spending services (gross costs)
+aws-super-cli cost with-credits           # Top spending services (net costs after credits)
+aws-super-cli cost month                  # Current month costs (matches AWS console)
+aws-super-cli cost daily --days 7         # Daily cost trends
+aws-super-cli cost by-account             # Multi-account cost breakdown
 ```
 
 ### Credit Analysis
 
 ```bash
-awsx cost credits               # Credit usage trends and burn rate
-awsx cost credits-by-service    # Service-level credit breakdown
+aws-super-cli cost credits               # Credit usage trends and burn rate
+aws-super-cli cost credits-by-service    # Service-level credit breakdown
 ```
 
 ### Key Features
@@ -90,30 +90,30 @@ Top Services by Credit Usage
 
 | Service | Command | Multi-Account | Filters |
 |---------|---------|---------------|---------|
-| EC2 | `awsx ls ec2` | ✅ | `--state`, `--instance-type`, `--tag` |
-| S3 | `awsx ls s3` | | `--match` |
-| VPC | `awsx ls vpc` | | `--match` |
-| RDS | `awsx ls rds` | | `--engine` |
-| Lambda | `awsx ls lambda` | | `--runtime` |
-| ELB | `awsx ls elb` | | `--type` |
-| IAM | `awsx ls iam` | | `--iam-type` |
+| EC2 | `aws-super-cli ls ec2` | ✅ | `--state`, `--instance-type`, `--tag` |
+| S3 | `aws-super-cli ls s3` | | `--match` |
+| VPC | `aws-super-cli ls vpc` | | `--match` |
+| RDS | `aws-super-cli ls rds` | | `--engine` |
+| Lambda | `aws-super-cli ls lambda` | | `--runtime` |
+| ELB | `aws-super-cli ls elb` | | `--type` |
+| IAM | `aws-super-cli ls iam` | | `--iam-type` |
 
 ## Multi-Account Support
 
-awsx automatically discovers AWS profiles and queries them in parallel:
+aws-super-cli automatically discovers AWS profiles and queries them in parallel:
 
 ```bash
 # Query all accessible accounts
-awsx ls ec2 --all-accounts
+aws-super-cli ls ec2 --all-accounts
 
 # Query specific accounts
-awsx ls s3 --accounts "prod-account,staging-account"
+aws-super-cli ls s3 --accounts "prod-account,staging-account"
 
 # Pattern matching
-awsx ls rds --accounts "prod-*"
+aws-super-cli ls rds --accounts "prod-*"
 
 # List available profiles
-awsx accounts
+aws-super-cli accounts
 ```
 
 ## Usage Examples
@@ -121,29 +121,29 @@ awsx accounts
 **Resource discovery:**
 ```bash
 # Find all running production instances
-awsx ls ec2 --all-accounts --state running --match prod
+aws-super-cli ls ec2 --all-accounts --state running --match prod
 
 # Audit IAM users across production accounts
-awsx ls iam --accounts "prod-*" --iam-type users
+aws-super-cli ls iam --accounts "prod-*" --iam-type users
 
 # Find PostgreSQL databases
-awsx ls rds --engine postgres --all-accounts
+aws-super-cli ls rds --engine postgres --all-accounts
 ```
 
 **Cost analysis:**
 ```bash
 # Monthly financial review
-awsx cost summary
-awsx cost month
-awsx cost credits
+aws-super-cli cost summary
+aws-super-cli cost month
+aws-super-cli cost credits
 
 # Cost optimization research
-awsx cost top-spend --days 7
-awsx cost credits-by-service
-awsx cost daily --days 30
+aws-super-cli cost top-spend --days 7
+aws-super-cli cost credits-by-service
+aws-super-cli cost daily --days 30
 
 # Multi-account cost breakdown
-awsx cost by-account
+aws-super-cli cost by-account
 ```
 
 ## Why AWS Super CLI?
@@ -201,8 +201,8 @@ Supports:
 
 | Operation | Cost | Commands |
 |-----------|------|----------|
-| Resource listing | Free | All `awsx ls` commands |
-| Cost Explorer API | $0.01/request | `awsx cost` commands |
+| Resource listing | Free | All `aws-super-cli ls` commands |
+| Cost Explorer API | $0.01/request | `aws-super-cli cost` commands |
 
 Monthly cost estimate: $0.50-2.00 for typical usage.
 
@@ -210,23 +210,23 @@ Monthly cost estimate: $0.50-2.00 for typical usage.
 
 **Debugging:**
 ```bash
-awsx cost summary --debug
-awsx ls ec2 --all-accounts --debug
-awsx test
+aws-super-cli cost summary --debug
+aws-super-cli ls ec2 --all-accounts --debug
+aws-super-cli test
 ```
 
 **Filtering:**
 ```bash
 # Fuzzy matching
-awsx ls ec2 --match "web"
+aws-super-cli ls ec2 --match "web"
 
 # Specific filters
-awsx ls ec2 --state running --instance-type "t3.*"
-awsx ls ec2 --tag "Environment=prod"
+aws-super-cli ls ec2 --state running --instance-type "t3.*"
+aws-super-cli ls ec2 --tag "Environment=prod"
 
 # Time-based cost analysis
-awsx cost daily --days 14
-awsx cost summary --days 90
+aws-super-cli cost daily --days 14
+aws-super-cli cost summary --days 90
 ```
 
 ## Contributing

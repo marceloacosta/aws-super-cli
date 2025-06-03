@@ -547,7 +547,7 @@ def check_low_cost_data(services_cost: List[Dict[str, str]], console: Console) -
         console.print("  • Cost Explorer has 24-48 hour data delay")
         console.print("  • Very recent usage may not appear yet")
         console.print("  • Free tier usage won't show costs")
-        console.print("  • awsx excludes credits to match console behavior")
+        console.print("  • AWS Super CLI excludes credits to match console behavior")
         
         return False  # No longer show as problematic
     

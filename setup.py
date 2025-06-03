@@ -11,7 +11,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="aws-super-cli",
-    version="0.1.2",
+    version="0.2.0",
     author="Marcelo Acosta",
     author_email="marcelo.acosta@latintradegroup.com",
     description="AWS Super CLI - Multi-account AWS resource discovery with service-level cost intelligence",
@@ -38,7 +38,7 @@ setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "awsx=awsx.cli:app",
+            "aws-super-cli=awsx.cli:app",
         ],
     },
     keywords="aws, cli, multi-account, devops, cloud, infrastructure",

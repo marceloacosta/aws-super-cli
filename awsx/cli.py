@@ -45,7 +45,7 @@ def ls(
             
             if not profiles_to_query:
                 console.print("[yellow]No accessible AWS accounts found.[/yellow]")
-                console.print("\n[dim]Run 'awsx accounts' to see available profiles[/dim]")
+                console.print("\n[dim]Run 'aws-super-cli accounts' to see available profiles[/dim]")
                 return
                 
             console.print(f"[dim]Querying {len(profiles_to_query)} accounts: {', '.join(profiles_to_query)}[/dim]")
@@ -74,7 +74,7 @@ def ls(
         
         if not profiles_to_query:
             console.print(f"[yellow]No profiles found matching: {accounts}[/yellow]")
-            console.print("\n[dim]Run 'awsx accounts' to see available profiles[/dim]")
+            console.print("\n[dim]Run 'aws-super-cli accounts' to see available profiles[/dim]")
             return
             
         console.print(f"[dim]Querying accounts: {', '.join(profiles_to_query)}[/dim]")
@@ -267,10 +267,10 @@ def ls(
             console.print("[cyan]Multi-account support currently available for: ec2[/cyan]")
             console.print("[yellow]Single-account support available for: s3, vpc, rds, lambda, elb, iam[/yellow]")
             console.print("\n[bold]Examples:[/bold]")
-            console.print("  awsx ls ec2 --all-accounts        # Multi-account EC2 (works now!)")
-            console.print("  awsx ls s3                        # Single-account S3")
-            console.print("  awsx ls rds --engine postgres     # Single-account RDS")
-            console.print("  awsx accounts                     # List available profiles")
+            console.print("  aws-super-cli ls ec2 --all-accounts        # Multi-account EC2 (works now!)")
+            console.print("  aws-super-cli ls s3                        # Single-account S3")
+            console.print("  aws-super-cli ls rds --engine postgres     # Single-account RDS")
+            console.print("  aws-super-cli accounts                     # List available profiles")
             return
 
     except Exception as e:
@@ -465,14 +465,14 @@ def cost(
         else:
             console.print(f"[red]Unknown cost command: {command}[/red]")
             console.print("\n[bold]Available commands:[/bold]")
-            console.print("  awsx cost top-spend          # Show top spending services (gross costs)")
-            console.print("  awsx cost with-credits       # Show top spending services (net costs)")
-            console.print("  awsx cost by-account         # Show costs by account")
-            console.print("  awsx cost daily              # Show daily cost trends")
-            console.print("  awsx cost summary            # Show comprehensive cost summary")
-            console.print("  awsx cost month              # Show current month costs")
-            console.print("  awsx cost credits            # Show credit usage analysis and trends")
-            console.print("  awsx cost credits-by-service # Show credit usage breakdown by service")
+            console.print("  aws-super-cli cost top-spend          # Show top spending services (gross costs)")
+            console.print("  aws-super-cli cost with-credits       # Show top spending services (net costs)")
+            console.print("  aws-super-cli cost by-account         # Show costs by account")
+            console.print("  aws-super-cli cost daily              # Show daily cost trends")
+            console.print("  aws-super-cli cost summary            # Show comprehensive cost summary")
+            console.print("  aws-super-cli cost month              # Show current month costs")
+            console.print("  aws-super-cli cost credits            # Show credit usage analysis and trends")
+            console.print("  aws-super-cli cost credits-by-service # Show credit usage breakdown by service")
             console.print("\n[bold]Cost Types:[/bold]")
             console.print("  • [green]Gross costs[/green]: What you'd pay without credits (matches console)")
             console.print("  • [blue]Net costs[/blue]: What you actually pay after credits")
@@ -501,10 +501,10 @@ def cost(
 
 @app.command()
 def version():
-    """Show awsx version and current AWS context"""
+    """Show AWS Super CLI version and current AWS context"""
     from . import __version__
     
-    rprint(f"[bold cyan]awsx[/bold cyan] version {__version__}")
+    rprint(f"[bold cyan]AWS Super CLI[/bold cyan] version {__version__}")
     
     # Show AWS context
     try:
@@ -678,14 +678,14 @@ def accounts():
         
         if accessible_accounts:
             console.print("\n[bold]Multi-account usage examples:[/bold]")
-            console.print("  awsx ls ec2 --all-accounts           # Query all accessible accounts")
-            console.print("  awsx ls s3 --accounts prod-*         # Query accounts matching pattern")
-            console.print("  awsx cost top-spend                  # Analyze costs across accounts")
+            console.print("  aws-super-cli ls ec2 --all-accounts           # Query all accessible accounts")
+            console.print("  aws-super-cli ls s3 --accounts prod-*         # Query accounts matching pattern")
+            console.print("  aws-super-cli cost top-spend                  # Analyze costs across accounts")
             
             # Show example with actual profile names
             example_profiles = [acc['profile'] for acc in accessible_accounts[:2]]
             if len(example_profiles) >= 2:
-                console.print(f"  awsx ls vpc --accounts {','.join(example_profiles)} # Query specific accounts")
+                console.print(f"  aws-super-cli ls vpc --accounts {','.join(example_profiles)} # Query specific accounts")
         
     except Exception as e:
         console.print(f"[red]Error discovering accounts: {e}[/red]")

@@ -350,7 +350,7 @@ class AWSSession:
             help_messages = [
                 "🔒 Your AWS credentials don't have sufficient permissions.",
                 "",
-                "Required permissions for awsx:",
+                "Required permissions for AWS Super CLI:",
                 "  • ec2:DescribeInstances",
                 "  • ec2:DescribeRegions", 
                 "  • ec2:DescribeVpcs",
