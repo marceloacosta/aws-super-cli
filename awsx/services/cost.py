@@ -8,6 +8,22 @@ from rich.console import Console
 from ..aws import aws_session
 
 
+def get_credits_filter() -> Dict[str, Any]:
+    """Get the filter to exclude credits and refunds, matching AWS Console behavior
+    
+    This is critical! The AWS Console excludes credits/refunds by default,
+    but the Cost Explorer API includes them, causing major discrepancies.
+    """
+    return {
+        "Not": {
+            "Dimensions": {
+                "Key": "RECORD_TYPE",
+                "Values": ["Refund", "Credit"]
+            }
+        }
+    }
+
+
 def format_cost_amount(amount: str) -> str:
     """Format cost amount for display"""
     try:
@@ -54,7 +70,7 @@ def get_current_month_range() -> tuple[str, str]:
 
 
 async def get_current_month_costs(debug: bool = False) -> Dict[str, str]:
-    """Get current month costs - this should match what you see in AWS console"""
+    """Get current month costs showing both gross and net amounts"""
     start_date, end_date = get_current_month_range()
     
     try:
@@ -64,50 +80,53 @@ async def get_current_month_costs(debug: bool = False) -> Dict[str, str]:
         console = Console()
         console.print(f"[dim]Querying current month costs from {start_date} to {end_date}[/dim]")
         
-        # Try different combinations of metrics
-        metrics_to_try = ['BlendedCost', 'UnblendedCost', 'NetBlendedCost', 'NetUnblendedCost']
+        # Get GROSS costs (without credits)
+        response_gross = ce_client.get_cost_and_usage(
+            TimePeriod={
+                'Start': start_date,
+                'End': end_date
+            },
+            Granularity='DAILY',
+            Metrics=['BlendedCost'],
+            Filter=get_credits_filter()
+        )
         
-        results = {}
+        # Get NET costs (with credits)
+        response_net = ce_client.get_cost_and_usage(
+            TimePeriod={
+                'Start': start_date,
+                'End': end_date
+            },
+            Granularity='DAILY',
+            Metrics=['BlendedCost']
+        )
         
-        for metric in metrics_to_try:
-            try:
-                response = ce_client.get_cost_and_usage(
-                    TimePeriod={
-                        'Start': start_date,
-                        'End': end_date
-                    },
-                    Granularity='DAILY',
-                    Metrics=[metric]
-                )
-                
-                total_cost = 0.0
-                for result in response.get('ResultsByTime', []):
-                    amount = float(result['Total'][metric]['Amount'])
-                    total_cost += amount
-                
-                results[metric] = {
-                    'amount': total_cost,
-                    'formatted': format_cost_amount(str(total_cost))
-                }
-                
-                if debug:
-                    console.print(f"[cyan]{metric}: ${total_cost:.6f}[/cyan]")
-                    
-            except Exception as e:
-                if debug:
-                    console.print(f"[red]Error with {metric}: {e}[/red]")
-                results[metric] = {'amount': 0.0, 'formatted': 'Error'}
+        if debug:
+            console.print(f"[cyan]Raw API Responses:[/cyan]")
+            import json
+            console.print("Gross:", json.dumps(response_gross, indent=2, default=str))
+            console.print("Net:", json.dumps(response_net, indent=2, default=str))
         
-        # Find the metric with the highest value (most likely to be correct)
-        best_metric = max(results.items(), key=lambda x: abs(x[1]['amount']))
+        # Calculate totals
+        gross_total = 0.0
+        for result in response_gross.get('ResultsByTime', []):
+            amount = float(result['Total']['BlendedCost']['Amount'])
+            gross_total += amount
         
-        console.print(f"[green]Best metric: {best_metric[0]} = {best_metric[1]['formatted']}[/green]")
+        net_total = 0.0
+        for result in response_net.get('ResultsByTime', []):
+            amount = float(result['Total']['BlendedCost']['Amount'])
+            net_total += amount
+        
+        credits_applied = gross_total - net_total
+        
+        console.print(f"[green]Current month: Gross ${gross_total:.2f}, Net ${net_total:.2f}, Credits ${credits_applied:.2f}[/green]")
         
         return {
             'period': f"Month-to-date ({start_date} to {end_date})",
-            'total_cost': best_metric[1]['formatted'],
-            'metric_used': best_metric[0],
-            'all_metrics': {k: v['formatted'] for k, v in results.items()}
+            'gross_cost': format_cost_amount(str(gross_total)),
+            'net_cost': format_cost_amount(str(net_total)),
+            'credits_applied': format_cost_amount(str(credits_applied))
         }
         
     except Exception as e:
@@ -115,14 +134,14 @@ async def get_current_month_costs(debug: bool = False) -> Dict[str, str]:
         console.print(f"[red]Error getting current month costs: {e}[/red]")
         return {
             'period': "Month-to-date",
-            'total_cost': "Error",
-            'metric_used': "Unknown",
-            'all_metrics': {}
+            'gross_cost': "Error",
+            'net_cost': "Error",
+            'credits_applied': "Error"
         }
 
 
-async def get_cost_by_service(days: int = 30, limit: int = 10, debug: bool = False) -> List[Dict[str, str]]:
-    """Get cost breakdown by AWS service"""
+async def get_cost_by_service(days: int = 30, limit: int = 10, debug: bool = False, include_credits: bool = False) -> List[Dict[str, str]]:
+    """Get cost breakdown by AWS service with option to include/exclude credits"""
     start_date, end_date = get_date_range(days)
     
     try:
@@ -133,23 +152,34 @@ async def get_cost_by_service(days: int = 30, limit: int = 10, debug: bool = Fal
         console = Console()
         console.print(f"[dim]Querying Cost Explorer from {start_date} to {end_date}[/dim]")
         
-        response = ce_client.get_cost_and_usage(
-            TimePeriod={
+        # Build filter conditionally
+        query_filter = None if include_credits else get_credits_filter()
+        cost_type = "with credits" if include_credits else "without credits"
+        
+        # Build the request parameters
+        request_params = {
+            'TimePeriod': {
                 'Start': start_date,
                 'End': end_date
             },
-            Granularity='DAILY',  # Changed from MONTHLY to DAILY
-            Metrics=['UnblendedCost'],  # Changed from BlendedCost to UnblendedCost
-            GroupBy=[
+            'Granularity': 'DAILY',
+            'Metrics': ['BlendedCost'],
+            'GroupBy': [
                 {
                     'Type': 'DIMENSION',
                     'Key': 'SERVICE'
                 }
             ]
-        )
+        }
+        
+        # Only add Filter if we have one
+        if query_filter is not None:
+            request_params['Filter'] = query_filter
+        
+        response = ce_client.get_cost_and_usage(**request_params)
         
         if debug:
-            console.print(f"[cyan]Raw API Response:[/cyan]")
+            console.print(f"[cyan]Raw API Response ({cost_type}):[/cyan]")
             import json
             console.print(json.dumps(response, indent=2, default=str))
         
@@ -162,9 +192,9 @@ async def get_cost_by_service(days: int = 30, limit: int = 10, debug: bool = Fal
             
             for group in result.get('Groups', []):
                 service_name = group['Keys'][0] if group['Keys'] else 'Unknown'
-                amount = float(group['Metrics']['UnblendedCost']['Amount'])
+                amount = float(group['Metrics']['BlendedCost']['Amount'])
                 
-                if debug and amount > 0:
+                if debug and amount != 0:  # Show both positive and negative
                     console.print(f"[dim]  {service_name}: ${amount:.6f}[/dim]")
                 
                 if service_name in service_totals:
@@ -175,19 +205,19 @@ async def get_cost_by_service(days: int = 30, limit: int = 10, debug: bool = Fal
         # Convert to list format
         services_cost = []
         for service_name, total_amount in service_totals.items():
-            if total_amount > 0:  # Only include services with actual cost
+            if abs(total_amount) > 0.001:  # Include both positive and negative amounts
                 services_cost.append({
                     'Service': service_name,
                     'Cost': format_cost_amount(str(total_amount)),
                     'Raw_Cost': total_amount
                 })
         
-        # Sort by cost and limit results
-        services_cost.sort(key=lambda x: x['Raw_Cost'], reverse=True)
+        # Sort by absolute cost value (highest impact first)
+        services_cost.sort(key=lambda x: abs(x['Raw_Cost']), reverse=True)
         
         # Debug output
         total_cost = sum(item['Raw_Cost'] for item in services_cost)
-        console.print(f"[dim]Total cost found: ${total_cost:.6f} across {len(services_cost)} services[/dim]")
+        console.print(f"[green]Total cost found ({cost_type}): ${total_cost:.2f} across {len(services_cost)} services[/green]")
         
         return services_cost[:limit]
         
@@ -212,13 +242,14 @@ async def get_cost_by_account(days: int = 30, debug: bool = False) -> List[Dict[
                 'End': end_date
             },
             Granularity='DAILY',
-            Metrics=['UnblendedCost'],
+            Metrics=['BlendedCost'],
             GroupBy=[
                 {
                     'Type': 'DIMENSION',
                     'Key': 'LINKED_ACCOUNT'
                 }
-            ]
+            ],
+            Filter=get_credits_filter()  # EXCLUDE CREDITS!
         )
         
         if debug:
@@ -232,7 +263,7 @@ async def get_cost_by_account(days: int = 30, debug: bool = False) -> List[Dict[
         for result in response.get('ResultsByTime', []):
             for group in result.get('Groups', []):
                 account_id = group['Keys'][0] if group['Keys'] else 'Unknown'
-                amount = float(group['Metrics']['UnblendedCost']['Amount'])
+                amount = float(group['Metrics']['BlendedCost']['Amount'])
                 
                 if account_id in account_totals:
                     account_totals[account_id] += amount
@@ -272,7 +303,8 @@ async def get_daily_costs(days: int = 7, debug: bool = False) -> List[Dict[str, 
                 'End': end_date
             },
             Granularity='DAILY',
-            Metrics=['UnblendedCost']
+            Metrics=['BlendedCost'],
+            Filter=get_credits_filter()  # EXCLUDE CREDITS!
         )
         
         if debug:
@@ -284,7 +316,7 @@ async def get_daily_costs(days: int = 7, debug: bool = False) -> List[Dict[str, 
         daily_costs = []
         for result in response.get('ResultsByTime', []):
             date_str = result['TimePeriod']['Start']
-            amount = result['Total']['UnblendedCost']['Amount']
+            amount = result['Total']['BlendedCost']['Amount']
             
             # Convert date to readable format
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
@@ -334,35 +366,58 @@ def create_cost_table(cost_data: List[Dict[str, str]], title: str, columns: List
 
 
 async def get_cost_summary(days: int = 30, debug: bool = False) -> Dict[str, str]:
-    """Get overall cost summary"""
+    """Get overall cost summary with both gross and net costs"""
     start_date, end_date = get_date_range(days)
     
     try:
         session = aws_session.session
         ce_client = session.client('ce', region_name='us-east-1')
         
-        # Get current period cost
-        response = ce_client.get_cost_and_usage(
+        # Get GROSS costs (without credits) - matches console default
+        response_gross = ce_client.get_cost_and_usage(
             TimePeriod={
                 'Start': start_date,
                 'End': end_date
             },
             Granularity='DAILY',
-            Metrics=['UnblendedCost']
+            Metrics=['BlendedCost'],
+            Filter=get_credits_filter()  # EXCLUDE CREDITS!
+        )
+        
+        # Get NET costs (with credits applied) - actual spend
+        response_net = ce_client.get_cost_and_usage(
+            TimePeriod={
+                'Start': start_date,
+                'End': end_date
+            },
+            Granularity='DAILY',
+            Metrics=['BlendedCost']
+            # No filter = includes credits
         )
         
         if debug:
             console = Console()
-            console.print(f"[cyan]Raw Summary API Response:[/cyan]")
+            console.print(f"[cyan]Raw Summary API Responses:[/cyan]")
             import json
-            console.print(json.dumps(response, indent=2, default=str))
+            console.print("Gross (no credits):", json.dumps(response_gross, indent=2, default=str))
+            console.print("Net (with credits):", json.dumps(response_net, indent=2, default=str))
         
-        total_cost = 0.0
-        for result in response.get('ResultsByTime', []):
-            amount = float(result['Total']['UnblendedCost']['Amount'])
-            total_cost += amount
+        # Calculate gross total
+        gross_total = 0.0
+        for result in response_gross.get('ResultsByTime', []):
+            amount = float(result['Total']['BlendedCost']['Amount'])
+            gross_total += amount
         
-        # Get previous period for comparison
+        # Calculate net total
+        net_total = 0.0
+        for result in response_net.get('ResultsByTime', []):
+            amount = float(result['Total']['BlendedCost']['Amount'])
+            net_total += amount
+        
+        # Calculate credits applied
+        credits_applied = gross_total - net_total
+        
+        # Get previous period for trend (using gross costs)
         prev_end = datetime.strptime(start_date, '%Y-%m-%d').date()
         prev_start = prev_end - timedelta(days=days)
         
@@ -372,18 +427,19 @@ async def get_cost_summary(days: int = 30, debug: bool = False) -> Dict[str, str
                 'End': prev_end.strftime('%Y-%m-%d')
             },
             Granularity='DAILY',
-            Metrics=['UnblendedCost']
+            Metrics=['BlendedCost'],
+            Filter=get_credits_filter()  # Compare gross-to-gross
         )
         
         prev_total = 0.0
         for result in prev_response.get('ResultsByTime', []):
-            amount = float(result['Total']['UnblendedCost']['Amount'])
+            amount = float(result['Total']['BlendedCost']['Amount'])
             prev_total += amount
         
         # Calculate trend
         trend = "→"
         if prev_total > 0:
-            change_pct = ((total_cost - prev_total) / prev_total) * 100
+            change_pct = ((gross_total - prev_total) / prev_total) * 100
             if change_pct > 5:
                 trend = f"↗ +{change_pct:.1f}%"
             elif change_pct < -5:
@@ -393,12 +449,16 @@ async def get_cost_summary(days: int = 30, debug: bool = False) -> Dict[str, str
         
         # Debug output
         console = Console()
-        console.print(f"[dim]Period: {start_date} to {end_date}, Total: ${total_cost:.6f}, Previous: ${prev_total:.6f}[/dim]")
+        console.print(f"[green]Period: {start_date} to {end_date}[/green]")
+        console.print(f"[green]Gross: ${gross_total:.2f}, Net: ${net_total:.2f}, Credits: ${credits_applied:.2f}[/green]")
         
         return {
             'period': f"Last {days} days",
-            'total_cost': format_cost_amount(str(total_cost)),
-            'daily_avg': format_cost_amount(str(total_cost / days)) if days > 0 else "$0.00",
+            'gross_cost': format_cost_amount(str(gross_total)),
+            'net_cost': format_cost_amount(str(net_total)),
+            'credits_applied': format_cost_amount(str(credits_applied)),
+            'daily_avg_gross': format_cost_amount(str(gross_total / days)) if days > 0 else "$0.00",
+            'daily_avg_net': format_cost_amount(str(net_total / days)) if days > 0 else "$0.00",
             'trend': trend
         }
         
@@ -407,8 +467,11 @@ async def get_cost_summary(days: int = 30, debug: bool = False) -> Dict[str, str
         console.print(f"[red]Error in cost summary: {e}[/red]")
         return {
             'period': f"Last {days} days",
-            'total_cost': "Error",
-            'daily_avg': "Error", 
+            'gross_cost': "Error",
+            'net_cost': "Error",
+            'credits_applied': "Error",
+            'daily_avg_gross': "Error", 
+            'daily_avg_net': "Error",
             'trend': "Error"
         }
 
@@ -439,7 +502,8 @@ async def get_specific_month_costs(year: int, month: int, debug: bool = False) -
                 'End': end_date
             },
             Granularity='MONTHLY',  # Use monthly for full month data
-            Metrics=['BlendedCost']
+            Metrics=['BlendedCost'],
+            Filter=get_credits_filter()  # EXCLUDE CREDITS!
         )
         
         if debug:
@@ -471,28 +535,316 @@ async def get_specific_month_costs(year: int, month: int, debug: bool = False) -
 def check_low_cost_data(services_cost: List[Dict[str, str]], console: Console) -> bool:
     """Check if cost data seems unusually low and provide helpful guidance"""
     if not services_cost:
-        return True
+        console.print("\n[green]✅ Cost data now properly excludes AWS credits![/green]")
+        console.print("[cyan]📊 If you still see $0, your account may genuinely have minimal costs.[/cyan]")
+        return False
         
     total_cost = sum(item.get('Raw_Cost', 0) for item in services_cost)
     
-    # If total costs are very low (less than $1), show guidance
+    # Updated guidance now that we exclude credits
     if total_cost < 1.0:
-        console.print("\n[yellow]⚠️  Cost Explorer API is returning very low amounts[/yellow]")
-        console.print("\n[bold]This is often caused by Cost Explorer setup issues:[/bold]")
-        console.print("  • [cyan]Cost Explorer API access not fully enabled[/cyan]")
-        console.print("  • Missing IAM permissions: ce:GetUsageReport, ce:ViewBilling")
-        console.print("  • Cost Explorer only enabled for console, not API")
-        console.print("  • Account in AWS Organization with consolidated billing")
-        console.print("  • 24-48 hour data delay for recent periods")
+        console.print("\n[cyan]💡 Tips for accurate cost data:[/cyan]")
+        console.print("  • Cost Explorer has 24-48 hour data delay")
+        console.print("  • Very recent usage may not appear yet")
+        console.print("  • Free tier usage won't show costs")
+        console.print("  • awsx now excludes credits to match console behavior")
         
-        console.print("\n[bold]To fix this:[/bold]")
-        console.print("  1. Go to AWS Console > Billing > Cost Management Preferences")
-        console.print("  2. Ensure 'Cost Explorer' is fully enabled (not just console)")
-        console.print("  3. Check IAM permissions for your user/role")
-        console.print("  4. If using Organizations, check master account settings")
-        
-        console.print("\n[cyan]💡 For current accurate costs, use AWS Billing console directly[/cyan]")
-        console.print("   https://console.aws.amazon.com/billing/home")
-        return True
+        return False  # No longer show as problematic
     
     return False 
+
+
+async def get_credit_analysis(days: int = 90, debug: bool = False) -> Dict[str, Any]:
+    """Get comprehensive credit usage analysis and trends"""
+    try:
+        session = aws_session.session
+        ce_client = session.client('ce', region_name='us-east-1')
+        
+        console = Console()
+        console.print(f"[dim]Analyzing credit usage patterns over last {days} days...[/dim]")
+        
+        # Get monthly credit usage for trend analysis
+        monthly_data = []
+        
+        # Get last 3 months of data for trend analysis
+        from datetime import datetime, timedelta
+        import calendar
+        
+        end_date = datetime.now().date()
+        
+        for i in range(3):  # Last 3 months
+            if i == 0:
+                # Current month (partial)
+                month_start = end_date.replace(day=1)
+                month_end = end_date + timedelta(days=1)
+            else:
+                # Previous months (complete)
+                temp_date = end_date.replace(day=1) - timedelta(days=i*30)
+                month_start = temp_date.replace(day=1)
+                
+                # Get last day of the month
+                last_day = calendar.monthrange(temp_date.year, temp_date.month)[1]
+                month_end = temp_date.replace(day=last_day) + timedelta(days=1)
+            
+            # Get gross costs (without credits)
+            response_gross = ce_client.get_cost_and_usage(
+                TimePeriod={
+                    'Start': month_start.strftime('%Y-%m-%d'),
+                    'End': month_end.strftime('%Y-%m-%d')
+                },
+                Granularity='MONTHLY',
+                Metrics=['BlendedCost'],
+                Filter=get_credits_filter()
+            )
+            
+            # Get net costs (with credits)
+            response_net = ce_client.get_cost_and_usage(
+                TimePeriod={
+                    'Start': month_start.strftime('%Y-%m-%d'),
+                    'End': month_end.strftime('%Y-%m-%d')
+                },
+                Granularity='MONTHLY',
+                Metrics=['BlendedCost']
+            )
+            
+            gross_total = 0.0
+            for result in response_gross.get('ResultsByTime', []):
+                gross_total += float(result['Total']['BlendedCost']['Amount'])
+            
+            net_total = 0.0
+            for result in response_net.get('ResultsByTime', []):
+                net_total += float(result['Total']['BlendedCost']['Amount'])
+            
+            credits_used = gross_total - net_total
+            
+            monthly_data.append({
+                'month': month_start.strftime('%Y-%m'),
+                'gross_cost': gross_total,
+                'net_cost': net_total,
+                'credits_used': credits_used,
+                'is_current': i == 0
+            })
+        
+        # Analyze credit usage trends
+        credit_usage_trend = []
+        total_credits_used = 0
+        
+        for month_data in reversed(monthly_data):  # Oldest to newest
+            credit_usage_trend.append({
+                'month': month_data['month'],
+                'credits_used': month_data['credits_used'],
+                'gross_cost': month_data['gross_cost']
+            })
+            total_credits_used += month_data['credits_used']
+        
+        # Calculate average monthly credit usage (excluding current partial month)
+        complete_months = [m for m in monthly_data if not m['is_current']]
+        avg_monthly_credits = sum(m['credits_used'] for m in complete_months) / len(complete_months) if complete_months else 0
+        
+        # Get current month credit usage rate
+        current_month = monthly_data[0]  # First item is current month
+        days_in_month = calendar.monthrange(datetime.now().year, datetime.now().month)[1]
+        current_day = datetime.now().day
+        
+        # Project current month usage
+        if current_day > 0:
+            daily_credit_rate = current_month['credits_used'] / current_day
+            projected_month_credits = daily_credit_rate * days_in_month
+        else:
+            projected_month_credits = 0
+        
+        # Estimate credit runway (Note: We can't get actual remaining balance from API)
+        runway_estimate = "Unknown - AWS API doesn't provide remaining credit balance"
+        if avg_monthly_credits > 10:  # Only estimate if significant usage
+            # This is a rough estimate - users need to check console for actual balance
+            runway_estimate = f"~{avg_monthly_credits:.0f} credits/month usage rate - Check AWS Console for actual balance"
+        
+        if debug:
+            console.print(f"[cyan]Credit Analysis Debug:[/cyan]")
+            for month in credit_usage_trend:
+                console.print(f"  {month['month']}: ${month['credits_used']:.2f} credits")
+        
+        return {
+            'total_credits_analyzed': total_credits_used,
+            'avg_monthly_usage': avg_monthly_credits,
+            'current_month_usage': current_month['credits_used'],
+            'projected_month_usage': projected_month_credits,
+            'credit_usage_trend': credit_usage_trend,
+            'runway_estimate': runway_estimate,
+            'analysis_period': f"Last 3 months",
+            'note': "AWS API doesn't provide remaining credit balance - check AWS Console for actual balance"
+        }
+        
+    except Exception as e:
+        console = Console()
+        console.print(f"[red]Error analyzing credits: {e}[/red]")
+        return {
+            'error': str(e),
+            'note': "Credit analysis requires Cost Explorer permissions"
+        }
+
+
+async def get_credit_usage_by_service(days: int = 30, debug: bool = False) -> List[Dict[str, Any]]:
+    """Get credit usage breakdown by service to see which services consume most credits"""
+    start_date, end_date = get_date_range(days)
+    
+    try:
+        session = aws_session.session
+        ce_client = session.client('ce', region_name='us-east-1')
+        
+        console = Console()
+        console.print(f"[dim]Analyzing credit impact by service from {start_date} to {end_date}...[/dim]")
+        
+        # Get gross costs by service (without credits)
+        response_gross = ce_client.get_cost_and_usage(
+            TimePeriod={
+                'Start': start_date,
+                'End': end_date
+            },
+            Granularity='DAILY',
+            Metrics=['BlendedCost'],
+            GroupBy=[{
+                'Type': 'DIMENSION',
+                'Key': 'SERVICE'
+            }],
+            Filter=get_credits_filter()
+        )
+        
+        # Get net costs by service (with credits)
+        response_net = ce_client.get_cost_and_usage(
+            TimePeriod={
+                'Start': start_date,
+                'End': end_date
+            },
+            Granularity='DAILY',
+            Metrics=['BlendedCost'],
+            GroupBy=[{
+                'Type': 'DIMENSION',
+                'Key': 'SERVICE'
+            }]
+        )
+        
+        # Aggregate gross costs by service
+        gross_by_service = {}
+        for result in response_gross.get('ResultsByTime', []):
+            for group in result.get('Groups', []):
+                service = group['Keys'][0] if group['Keys'] else 'Unknown'
+                amount = float(group['Metrics']['BlendedCost']['Amount'])
+                
+                if service in gross_by_service:
+                    gross_by_service[service] += amount
+                else:
+                    gross_by_service[service] = amount
+        
+        # Aggregate net costs by service
+        net_by_service = {}
+        for result in response_net.get('ResultsByTime', []):
+            for group in result.get('Groups', []):
+                service = group['Keys'][0] if group['Keys'] else 'Unknown'
+                amount = float(group['Metrics']['BlendedCost']['Amount'])
+                
+                if service in net_by_service:
+                    net_by_service[service] += amount
+                else:
+                    net_by_service[service] = amount
+        
+        # Calculate credit impact by service
+        credit_impact = []
+        for service in gross_by_service:
+            gross_cost = gross_by_service[service]
+            net_cost = net_by_service.get(service, 0)
+            credits_applied = gross_cost - net_cost
+            
+            if credits_applied > 0.01:  # Only include services with meaningful credit usage
+                credit_impact.append({
+                    'Service': service,
+                    'Gross_Cost': format_cost_amount(str(gross_cost)),
+                    'Net_Cost': format_cost_amount(str(net_cost)),
+                    'Credits_Applied': format_cost_amount(str(credits_applied)),
+                    'Credit_Coverage': f"{(credits_applied/gross_cost*100):.1f}%" if gross_cost > 0 else "0%",
+                    'Raw_Credits': credits_applied
+                })
+        
+        # Sort by credit usage
+        credit_impact.sort(key=lambda x: x['Raw_Credits'], reverse=True)
+        
+        if debug:
+            console.print(f"[cyan]Services with credit coverage:[/cyan]")
+            for item in credit_impact[:5]:
+                console.print(f"  {item['Service']}: {item['Credits_Applied']} ({item['Credit_Coverage']} coverage)")
+        
+        return credit_impact
+        
+    except Exception as e:
+        console = Console()
+        console.print(f"[red]Error analyzing credit usage by service: {e}[/red]")
+        return []
+
+
+def create_credit_analysis_table(credit_data: Dict[str, Any]) -> Table:
+    """Create a rich table for credit analysis"""
+    table = Table(title="💳 AWS Credits Analysis", show_header=True, header_style="bold magenta")
+    
+    table.add_column("Metric", style="cyan", min_width=25)
+    table.add_column("Value", style="green", min_width=20)
+    table.add_column("Notes", style="dim", min_width=30)
+    
+    table.add_row(
+        "Analysis Period",
+        credit_data.get('analysis_period', 'N/A'),
+        "Historical credit usage data"
+    )
+    
+    table.add_row(
+        "Total Credits (3 months)",
+        format_cost_amount(str(credit_data.get('total_credits_analyzed', 0))),
+        "Credits consumed in analysis period"
+    )
+    
+    table.add_row(
+        "Average Monthly Usage",
+        format_cost_amount(str(credit_data.get('avg_monthly_usage', 0))),
+        "Based on complete months only"
+    )
+    
+    table.add_row(
+        "Current Month Usage",
+        format_cost_amount(str(credit_data.get('current_month_usage', 0))),
+        "Month-to-date credit consumption"
+    )
+    
+    table.add_row(
+        "Projected Month Total",
+        format_cost_amount(str(credit_data.get('projected_month_usage', 0))),
+        "Estimated total for current month"
+    )
+    
+    table.add_row(
+        "Credit Runway",
+        "Check AWS Console",
+        credit_data.get('runway_estimate', 'AWS API limitation')
+    )
+    
+    return table
+
+
+def create_credit_usage_table(credit_usage: List[Dict[str, Any]], title: str = "Credit Usage by Service") -> Table:
+    """Create a rich table for credit usage by service"""
+    table = Table(title=title, show_header=True, header_style="bold magenta")
+    
+    table.add_column("Service", style="cyan", min_width=25)
+    table.add_column("Gross Cost", style="yellow", min_width=12, justify="right")
+    table.add_column("Credits Applied", style="green", min_width=15, justify="right")
+    table.add_column("Net Cost", style="blue", min_width=12, justify="right")
+    table.add_column("Coverage", style="magenta", min_width=10, justify="center")
+    
+    for item in credit_usage:
+        table.add_row(
+            item['Service'],
+            item['Gross_Cost'],
+            item['Credits_Applied'],
+            item['Net_Cost'],
+            item['Credit_Coverage']
+        )
+    
+    return table 

@@ -285,7 +285,7 @@ def ls(
 
 @app.command()
 def cost(
-    command: str = typer.Argument(..., help="Cost command (top-spend, by-account, daily, summary, month)"),
+    command: str = typer.Argument(..., help="Cost command (top-spend, with-credits, by-account, daily, summary, month, credits, credits-by-service)"),
     days: int = typer.Option(30, "--days", "-d", help="Number of days to analyze (default: 30)"),
     limit: int = typer.Option(10, "--limit", "-l", help="Number of results to show (default: 10)"),
     debug: bool = typer.Option(False, "--debug", help="Show debug information including raw API responses"),
@@ -308,12 +308,32 @@ def cost(
             
             table = cost_analysis.create_cost_table(
                 services_cost, 
-                f"Top {len(services_cost)} AWS Services by Cost (Last {days} days)"
+                f"Top {len(services_cost)} AWS Services by Cost (Last {days} days) - Gross Costs"
             )
             console.print(table)
             
             total_shown = sum(item['Raw_Cost'] for item in services_cost)
-            console.print(f"\n[green]Total cost shown: {cost_analysis.format_cost_amount(str(total_shown))}[/green]")
+            console.print(f"\n[green]Total gross cost shown: {cost_analysis.format_cost_amount(str(total_shown))}[/green]")
+            
+            # Also show with credits applied for comparison
+            console.print(f"\n[dim]💡 Use '--include-credits' flag to see costs with credits applied[/dim]")
+            
+        elif command_lower == "with-credits":
+            console.print(f"[cyan]Analyzing top spending services (WITH credits applied) for the last {days} days...[/cyan]")
+            
+            services_cost = asyncio.run(cost_analysis.get_cost_by_service(days=days, limit=limit, debug=debug, include_credits=True))
+            if not services_cost:
+                console.print("[yellow]No cost data available. Check permissions and try again.[/yellow]")
+                return
+            
+            table = cost_analysis.create_cost_table(
+                services_cost, 
+                f"Top {len(services_cost)} AWS Services by Cost (Last {days} days) - Net Costs (With Credits)"
+            )
+            console.print(table)
+            
+            total_shown = sum(item['Raw_Cost'] for item in services_cost)
+            console.print(f"\n[green]Total net cost shown: {cost_analysis.format_cost_amount(str(total_shown))}[/green]")
             
         elif command_lower == "by-account":
             console.print(f"[cyan]Analyzing costs by account for the last {days} days...[/cyan]")
@@ -328,12 +348,12 @@ def cost(
             
             table = cost_analysis.create_cost_table(
                 accounts_cost[:limit], 
-                f"AWS Costs by Account (Last {days} days)"
+                f"AWS Costs by Account (Last {days} days) - Gross Costs"
             )
             console.print(table)
             
             total_shown = sum(item['Raw_Cost'] for item in accounts_cost[:limit])
-            console.print(f"\n[green]Total cost shown: {cost_analysis.format_cost_amount(str(total_shown))}[/green]")
+            console.print(f"\n[green]Total gross cost shown: {cost_analysis.format_cost_amount(str(total_shown))}[/green]")
             
         elif command_lower == "daily":
             console.print("[cyan]Analyzing daily cost trends...[/cyan]")
@@ -348,7 +368,7 @@ def cost(
             
             table = cost_analysis.create_cost_table(
                 daily_costs, 
-                "Daily Cost Trend (Last 7 days)"
+                "Daily Cost Trend (Last 7 days) - Gross Costs"
             )
             console.print(table)
             
@@ -368,44 +388,99 @@ def cost(
             
             summary = asyncio.run(cost_analysis.get_cost_summary(days=days, debug=debug))
             
-            console.print("\n[bold]Cost Summary[/bold]")
+            console.print("\n[bold]💰 Cost Summary[/bold]")
             console.print(f"Period: {summary['period']}")
-            console.print(f"Total Cost: [green]{summary['total_cost']}[/green]")
-            console.print(f"Daily Average: [blue]{summary['daily_avg']}[/blue]")
+            console.print(f"Gross Cost (without credits): [green]{summary['gross_cost']}[/green]")
+            console.print(f"Net Cost (with credits):      [blue]{summary['net_cost']}[/blue]")
+            console.print(f"Credits Applied:              [yellow]{summary['credits_applied']}[/yellow]")
+            console.print(f"Daily Average (gross):        [cyan]{summary['daily_avg_gross']}[/cyan]")
+            console.print(f"Daily Average (net):          [dim]{summary['daily_avg_net']}[/dim]")
             console.print(f"Trend: {summary['trend']}")
             
-            # Check if costs seem low
-            try:
-                total_amount = float(summary['total_cost'].replace('$', '').replace(',', '').replace('<', ''))
-                if total_amount < 1.0:
-                    fake_cost_list = [{'Raw_Cost': total_amount}]
-                    cost_analysis.check_low_cost_data(fake_cost_list, console)
-            except:
-                pass  # Ignore parsing errors
-            
         elif command_lower == "month":
-            console.print("[cyan]Getting current month costs (should match AWS console)...[/cyan]")
+            console.print("[cyan]Getting current month costs (matches AWS console)...[/cyan]")
             
             month_data = asyncio.run(cost_analysis.get_current_month_costs(debug=debug))
             
-            console.print("\n[bold]Current Month Costs[/bold]")
+            console.print("\n[bold]📅 Current Month Costs[/bold]")
             console.print(f"Period: {month_data['period']}")
-            console.print(f"Total Cost: [green]{month_data['total_cost']}[/green]")
-            console.print(f"Metric Used: {month_data['metric_used']}")
+            console.print(f"Gross Cost (without credits): [green]{month_data['gross_cost']}[/green]")
+            console.print(f"Net Cost (with credits):      [blue]{month_data['net_cost']}[/blue]")
+            console.print(f"Credits Applied:              [yellow]{month_data['credits_applied']}[/yellow]")
             
-            if debug:
-                console.print("\n[bold]All Metrics:[/bold]")
-                for metric, value in month_data['all_metrics'].items():
-                    console.print(f"  {metric}: {value}")
+        elif command_lower == "credits":
+            console.print("[cyan]🔍 Analyzing AWS credits usage patterns...[/cyan]")
+            
+            credit_analysis = asyncio.run(cost_analysis.get_credit_analysis(days=90, debug=debug))
+            
+            if 'error' in credit_analysis:
+                console.print(f"[red]Error: {credit_analysis['error']}[/red]")
+                console.print(f"[yellow]{credit_analysis['note']}[/yellow]")
+                return
+            
+            # Show credit analysis table
+            table = cost_analysis.create_credit_analysis_table(credit_analysis)
+            console.print(table)
+            
+            # Show monthly trend
+            console.print("\n[bold]📈 Monthly Credit Usage Trend[/bold]")
+            for month_data in credit_analysis['credit_usage_trend']:
+                credits = cost_analysis.format_cost_amount(str(month_data['credits_used']))
+                gross = cost_analysis.format_cost_amount(str(month_data['gross_cost']))
+                console.print(f"  {month_data['month']}: [yellow]{credits}[/yellow] credits applied (gross: [dim]{gross}[/dim])")
+            
+            # Important note about remaining balance
+            console.print(f"\n[bold yellow]⚠️  Important:[/bold yellow]")
+            console.print(f"[dim]{credit_analysis['note']}[/dim]")
+            console.print(f"[cyan]💡 To see remaining credit balance, visit:[/cyan]")
+            console.print(f"   [link]https://console.aws.amazon.com/billing/home#/credits[/link]")
+            
+        elif command_lower == "credits-by-service":
+            console.print(f"[cyan]🔍 Analyzing credit usage by service (last {days} days)...[/cyan]")
+            
+            credit_usage = asyncio.run(cost_analysis.get_credit_usage_by_service(days=days, debug=debug))
+            
+            if not credit_usage:
+                console.print("[yellow]No services found with significant credit usage.[/yellow]")
+                return
+            
+            # Show credit usage by service
+            table = cost_analysis.create_credit_usage_table(
+                credit_usage[:limit], 
+                f"💳 Top {min(len(credit_usage), limit)} Services by Credit Usage (Last {days} days)"
+            )
+            console.print(table)
+            
+            # Summary
+            total_credits_used = sum(item['Raw_Credits'] for item in credit_usage)
+            console.print(f"\n[green]Total credits applied across {len(credit_usage)} services: {cost_analysis.format_cost_amount(str(total_credits_used))}[/green]")
+            
+            # Show highest coverage services
+            high_coverage = [s for s in credit_usage if float(s['Credit_Coverage'].replace('%', '')) > 90]
+            if high_coverage:
+                console.print(f"\n[cyan]💯 Services with >90% credit coverage:[/cyan]")
+                for service in high_coverage[:3]:
+                    console.print(f"  • {service['Service']}: {service['Credit_Coverage']} coverage")
             
         else:
             console.print(f"[red]Unknown cost command: {command}[/red]")
             console.print("\n[bold]Available commands:[/bold]")
-            console.print("  awsx cost top-spend      # Show top spending services")
-            console.print("  awsx cost by-account     # Show costs by account")
-            console.print("  awsx cost daily          # Show daily cost trends")
-            console.print("  awsx cost summary        # Show overall cost summary")
-            console.print("  awsx cost month          # Show current month costs (like AWS console)")
+            console.print("  awsx cost top-spend          # Show top spending services (gross costs)")
+            console.print("  awsx cost with-credits       # Show top spending services (net costs)")
+            console.print("  awsx cost by-account         # Show costs by account")
+            console.print("  awsx cost daily              # Show daily cost trends")
+            console.print("  awsx cost summary            # Show comprehensive cost summary")
+            console.print("  awsx cost month              # Show current month costs")
+            console.print("  awsx cost credits            # Show credit usage analysis and trends")
+            console.print("  awsx cost credits-by-service # Show credit usage breakdown by service")
+            console.print("\n[bold]Cost Types:[/bold]")
+            console.print("  • [green]Gross costs[/green]: What you'd pay without credits (matches console)")
+            console.print("  • [blue]Net costs[/blue]: What you actually pay after credits")
+            console.print("  • [yellow]Credits[/yellow]: Amount of credits applied")
+            console.print("\n[bold]Credit Analysis:[/bold]")
+            console.print("  • [cyan]Usage trends[/cyan]: Historical credit consumption patterns")
+            console.print("  • [magenta]Service breakdown[/magenta]: Which services use most credits")
+            console.print("  • [yellow]Coverage analysis[/yellow]: Credit coverage percentage by service")
             console.print("\n[bold]Options:[/bold]")
             console.print("  --days 7                 # Analyze last 7 days")
             console.print("  --limit 5                # Show top 5 results")
