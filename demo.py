@@ -38,11 +38,11 @@ def run_awsx_command(cmd):
 def demo_header():
     """Show demo header"""
     title = Text("AWS Super CLI (awsx) - Comprehensive Demo", style="bold blue")
-    subtitle = Text("Discover your AWS empire across 7 major services", style="dim")
+    subtitle = Text("Multi-account AWS resource discovery across 7 services", style="dim")
     
     console.print()
     console.print(Panel(f"{title}\n{subtitle}", 
-                       title="🚀 awsx", 
+                       title="awsx", 
                        title_align="center",
                        border_style="blue"))
     console.print()

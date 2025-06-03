@@ -512,38 +512,45 @@ def version():
         
         if has_creds and account_id:
             # Working credentials
-            credential_source = aws_session.detect_credential_source()
-            rprint(f"[dim]AWS Context:[/dim]")
-            rprint(f"  Account: {account_id}")
-            rprint(f"  Credentials: {credential_source}")
+            credential_source = aws_session.get_credential_source()
+            region = aws_session.get_current_region()
             
-            # Show current region
-            import boto3
-            session = boto3.Session()
-            region = session.region_name or 'us-east-1'
-            rprint(f"  Default Region: {region}")
+            rprint(f"✅ Credentials working: {credential_source}")
+            rprint(f"✅ Account ID: {account_id}")
             
-        elif has_creds and error:
-            # Credentials exist but are invalid/expired
-            credential_source = aws_session.detect_credential_source()
-            rprint(f"[yellow]AWS credentials found ({credential_source}) but invalid/expired[/yellow]")
-            rprint(f"[red]Error: {error}[/red]")
-            rprint("")
+            if region:
+                rprint(f"✅ Default region: {region}")
             
-            # Show helpful guidance
-            help_messages = aws_session.get_credential_help(error)
-            for message in help_messages:
-                rprint(message)
-        else:
-            # No credentials
-            rprint("[yellow]No AWS credentials configured[/yellow]")
-            rprint("")
-            help_messages = aws_session.get_credential_help(Exception("NoCredentialsError"))
-            for message in help_messages:
-                rprint(message)
+            # Test basic AWS access
+            try:
+                session = aws_session.session
+                ec2 = session.client('ec2', region_name=region or 'us-east-1')
                 
+                # Quick test - list instances (this is free)
+                response = ec2.describe_instances(MaxResults=5)
+                instance_count = sum(len(reservation['Instances']) for reservation in response['Reservations'])
+                
+                if instance_count > 0:
+                    rprint(f"✅ EC2 API access working - found {instance_count} instances in {region or 'us-east-1'}")
+                else:
+                    rprint(f"✅ EC2 API access working - no instances in {region or 'us-east-1'}")
+                    
+            except Exception as e:
+                rprint(f"[yellow]⚠️ API access test failed: {e}[/yellow]")
+                
+        else:
+            rprint(f"[red]❌ No valid AWS credentials found[/red]")
+            if error:
+                rprint(f"[red]Error: {error}[/red]")
+                
+            rprint("\n[yellow]Setup AWS credentials using one of:[/yellow]")
+            rprint("  • aws configure")
+            rprint("  • AWS SSO: aws sso login --profile <profile>")
+            rprint("  • Environment variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY")
+            rprint("  • IAM roles or EC2 instance profiles")
+            
     except Exception as e:
-        rprint(f"[red]Error checking AWS context: {e}[/red]")
+        rprint(f"[red]Error checking credentials: {e}[/red]")
 
 
 @app.command()

@@ -535,8 +535,8 @@ async def get_specific_month_costs(year: int, month: int, debug: bool = False) -
 def check_low_cost_data(services_cost: List[Dict[str, str]], console: Console) -> bool:
     """Check if cost data seems unusually low and provide helpful guidance"""
     if not services_cost:
-        console.print("\n[green]✅ Cost data now properly excludes AWS credits![/green]")
-        console.print("[cyan]📊 If you still see $0, your account may genuinely have minimal costs.[/cyan]")
+        console.print("\n[green]✅ Cost data properly excludes AWS credits[/green]")
+        console.print("[cyan]📊 If you still see $0, your account may have minimal costs[/cyan]")
         return False
         
     total_cost = sum(item.get('Raw_Cost', 0) for item in services_cost)
@@ -547,7 +547,7 @@ def check_low_cost_data(services_cost: List[Dict[str, str]], console: Console) -
         console.print("  • Cost Explorer has 24-48 hour data delay")
         console.print("  • Very recent usage may not appear yet")
         console.print("  • Free tier usage won't show costs")
-        console.print("  • awsx now excludes credits to match console behavior")
+        console.print("  • awsx excludes credits to match console behavior")
         
         return False  # No longer show as problematic
     
