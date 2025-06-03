@@ -13,7 +13,7 @@ setup(
     name="aws-super-cli",
     version="0.1.0",
     author="Marcelo Acosta",
-    author_email="your-email@example.com",
+    author_email="marcelo.acosta@latintradegroup.com",
     description="AWS Super CLI - See your AWS resources across all accounts in one command",
     long_description=long_description,
     long_description_content_type="text/markdown",
