@@ -285,9 +285,10 @@ def ls(
 
 @app.command()
 def cost(
-    command: str = typer.Argument(..., help="Cost command (top-spend, by-account, daily, summary)"),
+    command: str = typer.Argument(..., help="Cost command (top-spend, by-account, daily, summary, month)"),
     days: int = typer.Option(30, "--days", "-d", help="Number of days to analyze (default: 30)"),
     limit: int = typer.Option(10, "--limit", "-l", help="Number of results to show (default: 10)"),
+    debug: bool = typer.Option(False, "--debug", help="Show debug information including raw API responses"),
 ):
     """Analyze AWS costs and spending patterns"""
     command_lower = command.lower()
@@ -296,10 +297,14 @@ def cost(
         if command_lower == "top-spend":
             console.print(f"[cyan]Analyzing top spending services for the last {days} days...[/cyan]")
             
-            services_cost = asyncio.run(cost_analysis.get_cost_by_service(days=days, limit=limit))
+            # Pass debug flag
+            services_cost = asyncio.run(cost_analysis.get_cost_by_service(days=days, limit=limit, debug=debug))
             if not services_cost:
                 console.print("[yellow]No cost data available. Check permissions and try again.[/yellow]")
                 return
+            
+            # Check for low cost data and show guidance
+            is_low_cost = cost_analysis.check_low_cost_data(services_cost, console)
             
             table = cost_analysis.create_cost_table(
                 services_cost, 
@@ -313,10 +318,13 @@ def cost(
         elif command_lower == "by-account":
             console.print(f"[cyan]Analyzing costs by account for the last {days} days...[/cyan]")
             
-            accounts_cost = asyncio.run(cost_analysis.get_cost_by_account(days=days))
+            accounts_cost = asyncio.run(cost_analysis.get_cost_by_account(days=days, debug=debug))
             if not accounts_cost:
                 console.print("[yellow]No account cost data available.[/yellow]")
                 return
+            
+            # Check for low cost data
+            cost_analysis.check_low_cost_data(accounts_cost, console)
             
             table = cost_analysis.create_cost_table(
                 accounts_cost[:limit], 
@@ -330,10 +338,13 @@ def cost(
         elif command_lower == "daily":
             console.print("[cyan]Analyzing daily cost trends...[/cyan]")
             
-            daily_costs = asyncio.run(cost_analysis.get_daily_costs(days=days))
+            daily_costs = asyncio.run(cost_analysis.get_daily_costs(days=days, debug=debug))
             if not daily_costs:
                 console.print("[yellow]No daily cost data available.[/yellow]")
                 return
+            
+            # Check for low cost data
+            cost_analysis.check_low_cost_data(daily_costs, console)
             
             table = cost_analysis.create_cost_table(
                 daily_costs, 
@@ -355,13 +366,37 @@ def cost(
         elif command_lower == "summary":
             console.print(f"[cyan]Getting cost summary for the last {days} days...[/cyan]")
             
-            summary = asyncio.run(cost_analysis.get_cost_summary(days=days))
+            summary = asyncio.run(cost_analysis.get_cost_summary(days=days, debug=debug))
             
             console.print("\n[bold]Cost Summary[/bold]")
             console.print(f"Period: {summary['period']}")
             console.print(f"Total Cost: [green]{summary['total_cost']}[/green]")
             console.print(f"Daily Average: [blue]{summary['daily_avg']}[/blue]")
             console.print(f"Trend: {summary['trend']}")
+            
+            # Check if costs seem low
+            try:
+                total_amount = float(summary['total_cost'].replace('$', '').replace(',', '').replace('<', ''))
+                if total_amount < 1.0:
+                    fake_cost_list = [{'Raw_Cost': total_amount}]
+                    cost_analysis.check_low_cost_data(fake_cost_list, console)
+            except:
+                pass  # Ignore parsing errors
+            
+        elif command_lower == "month":
+            console.print("[cyan]Getting current month costs (should match AWS console)...[/cyan]")
+            
+            month_data = asyncio.run(cost_analysis.get_current_month_costs(debug=debug))
+            
+            console.print("\n[bold]Current Month Costs[/bold]")
+            console.print(f"Period: {month_data['period']}")
+            console.print(f"Total Cost: [green]{month_data['total_cost']}[/green]")
+            console.print(f"Metric Used: {month_data['metric_used']}")
+            
+            if debug:
+                console.print("\n[bold]All Metrics:[/bold]")
+                for metric, value in month_data['all_metrics'].items():
+                    console.print(f"  {metric}: {value}")
             
         else:
             console.print(f"[red]Unknown cost command: {command}[/red]")
@@ -370,9 +405,11 @@ def cost(
             console.print("  awsx cost by-account     # Show costs by account")
             console.print("  awsx cost daily          # Show daily cost trends")
             console.print("  awsx cost summary        # Show overall cost summary")
+            console.print("  awsx cost month          # Show current month costs (like AWS console)")
             console.print("\n[bold]Options:[/bold]")
             console.print("  --days 7                 # Analyze last 7 days")
             console.print("  --limit 5                # Show top 5 results")
+            console.print("  --debug                  # Show debug information")
             
     except Exception as e:
         console.print(f"[red]Error analyzing costs: {e}[/red]")
