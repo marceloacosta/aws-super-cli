@@ -1,4 +1,4 @@
-# Contributing to awsx
+# Contributing to AWS Super CLI
 
 ## Commit Message Guidelines
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Setup script for awsx - AWS Super CLI"""
+"""Setup script for AWS Super CLI"""
 
 from setuptools import setup, find_packages
 
@@ -11,10 +11,10 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="aws-super-cli",
-    version="0.1.1",
+    version="0.1.2",
     author="Marcelo Acosta",
     author_email="marcelo.acosta@latintradegroup.com",
-    description="AWS Super CLI - See your AWS resources across all accounts in one command",
+    description="AWS Super CLI - Multi-account AWS resource discovery with service-level cost intelligence",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/marceloacosta/awsx",

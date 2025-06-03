@@ -1,15 +1,15 @@
-# AWS Super CLI (awsx)
+# AWS Super CLI
 
-Multi-account AWS resource discovery with advanced cost analysis and service-level credit tracking.
+[![PyPI version](https://badge.fury.io/py/aws-super-cli.svg)](https://badge.fury.io/py/aws-super-cli)
 
-## What is awsx?
+## What is AWS Super CLI?
 
-awsx is a command-line tool for AWS resource discovery and cost analysis across multiple accounts. It solves two key problems:
+AWS Super CLI is a command-line tool for AWS resource discovery and cost analysis across multiple accounts. It solves two key problems:
 
-1. **Multi-account resource visibility** - Query resources across all your AWS accounts in parallel
-2. **Cost transparency** - Separate actual costs from credit-subsidized costs with service-level breakdown
+1. **Multi-account resource visibility**: See all your AWS resources across accounts in unified tables
+2. **Service-level cost intelligence**: Get detailed cost analysis with credit allocation per service
 
-Unlike the AWS CLI which requires manual profile switching and outputs verbose JSON, awsx provides clean tables and can query multiple accounts simultaneously.
+Unlike the AWS CLI which requires manual profile switching and outputs verbose JSON, AWS Super CLI provides clean tables and can query multiple accounts simultaneously.
 
 **Unique feature**: Service-level credit usage analysis - see exactly which AWS services consume your promotional credits and at what percentage.
 
@@ -25,17 +25,17 @@ pip install aws-super-cli
 # List EC2 instances across all accounts
 awsx ls ec2 --all-accounts
 
-# Cost analysis
+# Get cost summary with credit analysis
 awsx cost summary
 awsx cost credits-by-service
 
-# See available AWS profiles
+# List available AWS profiles
 awsx accounts
 ```
 
 ## Cost Analysis
 
-awsx provides comprehensive cost analysis using AWS Cost Explorer API:
+AWS Super CLI provides comprehensive cost analysis using AWS Cost Explorer API:
 
 ### Basic Cost Commands
 
@@ -146,9 +146,9 @@ awsx cost daily --days 30
 awsx cost by-account
 ```
 
-## Why awsx?
+## Why AWS Super CLI?
 
-| Feature | AWS CLI v2 | awsx | Other Tools |
+| Feature | AWS CLI v2 | AWS Super CLI | Other Tools |
 |---------|------------|------|-------------|
 | Multi-account queries | Manual switching | Automatic parallel | Varies |
 | Output format | JSON only | Rich tables | Varies |
@@ -156,13 +156,13 @@ awsx cost by-account
 | Credit tracking | None | Service-level | None |
 | Setup complexity | Medium | Zero config | High |
 
-**awsx is the only tool that provides service-level credit usage analysis.**
+**AWS Super CLI is the only tool that provides service-level credit usage analysis.**
 
 ## Technical Details
 
 ### Cost Explorer Integration
 
-awsx fixes a major discrepancy between AWS Cost Explorer API and the AWS Console. The console excludes credits by default, but the API includes them, causing confusion. awsx handles this correctly and provides both views.
+AWS Super CLI fixes a major discrepancy between AWS Cost Explorer API and the AWS Console. The console excludes credits by default, but the API includes them, causing confusion. AWS Super CLI handles this correctly and provides both views.
 
 ### Multi-Account Architecture
 
@@ -180,7 +180,7 @@ awsx fixes a major discrepancy between AWS Cost Explorer API and the AWS Console
 
 ## Configuration
 
-awsx uses your existing AWS configuration. No additional setup required.
+AWS Super CLI uses your existing AWS configuration. No additional setup required.
 
 Supports:
 - AWS profiles
@@ -244,4 +244,4 @@ Apache 2.0
 
 ---
 
-**awsx** - Multi-account AWS resource discovery with service-level cost intelligence.
+**AWS Super CLI** - Multi-account AWS resource discovery with service-level cost intelligence.
