@@ -1,0 +1,6 @@
+boto3>=1.26.0
+aioboto3>=11.0.0
+typer>=0.7.0
+rich>=13.0.0
+botocore>=1.29.0
+aiohttp>=3.8.0 
