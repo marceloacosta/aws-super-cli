@@ -184,6 +184,35 @@ awsx ls ec2 --tag "Environment=prod"
 - Required permissions: `ec2:Describe*`, `s3:List*`, `rds:Describe*`, `lambda:List*`, `elasticloadbalancing:Describe*`, `iam:List*`, `sts:GetCallerIdentity`
 - For cost analysis: `ce:GetCostAndUsage`, `ce:GetDimensionValues`
 
+## Cost
+
+### Tool Cost
+**awsx is completely free** - open source with no subscription fees.
+
+### AWS API Costs
+Most AWS operations used by awsx are **free**:
+
+| Operation | Cost | Used By |
+|-----------|------|---------|
+| `describe_instances`, `list_buckets`, etc. | **FREE** | All `awsx ls` commands |
+| `sts:GetCallerIdentity` | **FREE** | Authentication |
+| Cost Explorer API | **$0.01 per request** | `awsx cost` commands |
+
+### Typical Usage Costs
+```bash
+# Resource listing (always free)
+awsx ls ec2 --all-accounts    # $0.00
+awsx ls s3 --all-regions      # $0.00
+
+# Cost analysis (minimal charges)
+awsx cost summary             # $0.01
+awsx cost top-spend           # $0.01
+```
+
+**Monthly cost estimate**: $0.50-2.00 for typical usage
+
+The cost is **negligible compared to engineer time saved** - typically less than a cup of coffee per month while saving hours of manual AWS console work.
+
 ## Contributing
 
 Contributions welcome. Please ensure your code:
