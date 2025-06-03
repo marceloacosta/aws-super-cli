@@ -463,13 +463,21 @@ def check_low_cost_data(services_cost: List[Dict[str, str]], console: Console) -
     
     # If total costs are very low (less than $1), show guidance
     if total_cost < 1.0:
-        console.print("\n[yellow]⚠️  Cost Explorer is showing very low amounts (likely credits/adjustments)[/yellow]")
-        console.print("\n[bold]If your AWS console shows higher costs, this might be due to:[/bold]")
-        console.print("  • Cost Explorer API showing net costs (after credits)")
-        console.print("  • Different time zones between API and console")
-        console.print("  • 24-48 hour data delay in Cost Explorer")
-        console.print("  • Consolidated billing (if part of AWS Organization)")
-        console.print("\n[cyan]💡 For accurate current costs, check your AWS Billing console directly[/cyan]")
+        console.print("\n[yellow]⚠️  Cost Explorer API is returning very low amounts[/yellow]")
+        console.print("\n[bold]This is often caused by Cost Explorer setup issues:[/bold]")
+        console.print("  • [cyan]Cost Explorer API access not fully enabled[/cyan]")
+        console.print("  • Missing IAM permissions: ce:GetUsageReport, ce:ViewBilling")
+        console.print("  • Cost Explorer only enabled for console, not API")
+        console.print("  • Account in AWS Organization with consolidated billing")
+        console.print("  • 24-48 hour data delay for recent periods")
+        
+        console.print("\n[bold]To fix this:[/bold]")
+        console.print("  1. Go to AWS Console > Billing > Cost Management Preferences")
+        console.print("  2. Ensure 'Cost Explorer' is fully enabled (not just console)")
+        console.print("  3. Check IAM permissions for your user/role")
+        console.print("  4. If using Organizations, check master account settings")
+        
+        console.print("\n[cyan]💡 For current accurate costs, use AWS Billing console directly[/cyan]")
         console.print("   https://console.aws.amazon.com/billing/home")
         return True
     
