@@ -35,7 +35,7 @@ class SecurityFinding:
 
 
 async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) -> List[SecurityFinding]:
-    """Audit S3 buckets for security misconfigurations"""
+    """Audit S3 buckets for security misconfigurations - Phase 3 comprehensive assessment"""
     findings = []
     
     try:
@@ -44,6 +44,38 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
         session = aioboto3.Session()
         
         async with session.client('s3', region_name=region) as s3_client:
+            # First, check account-level public access block configuration
+            try:
+                account_pab = await s3_client.get_public_access_block()
+                pab_config = account_pab.get('PublicAccessBlockConfiguration', {})
+                
+                if not all([
+                    pab_config.get('BlockPublicAcls', False),
+                    pab_config.get('IgnorePublicAcls', False),
+                    pab_config.get('BlockPublicPolicy', False),
+                    pab_config.get('RestrictPublicBuckets', False)
+                ]):
+                    findings.append(SecurityFinding(
+                        resource_type='S3',
+                        resource_id='Account-Level',
+                        finding_type='ACCOUNT_PUBLIC_ACCESS_BLOCK',
+                        severity='HIGH',
+                        description='Account-level public access block is not fully configured',
+                        region=region,
+                        remediation='Enable all account-level public access block settings'
+                    ))
+            except Exception:
+                # No account-level public access block configured
+                findings.append(SecurityFinding(
+                    resource_type='S3',
+                    resource_id='Account-Level',
+                    finding_type='NO_ACCOUNT_PUBLIC_ACCESS_BLOCK',
+                    severity='HIGH',
+                    description='Account-level public access block is not configured',
+                    region=region,
+                    remediation='Configure account-level public access block settings'
+                ))
+            
             # List all buckets
             response = await s3_client.list_buckets()
             buckets = response.get('Buckets', [])
@@ -52,71 +84,240 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                 bucket_name = bucket['Name']
                 
                 try:
-                    # Check if bucket is publicly readable
+                    # Get bucket location to handle region-specific calls
                     try:
-                        acl = await s3_client.get_bucket_acl(Bucket=bucket_name)
-                        for grant in acl.get('Grants', []):
-                            grantee = grant.get('Grantee', {})
-                            
-                            # Check for public read access
-                            if (grantee.get('Type') == 'Group' and 
-                                grantee.get('URI') in [
-                                    'http://acs.amazonaws.com/groups/global/AllUsers',
-                                    'http://acs.amazonaws.com/groups/global/AuthenticatedUsers'
-                                ]):
-                                
-                                permission = grant.get('Permission')
-                                if permission in ['READ', 'FULL_CONTROL']:
-                                    findings.append(SecurityFinding(
-                                        resource_type='S3',
-                                        resource_id=bucket_name,
-                                        finding_type='PUBLIC_BUCKET',
-                                        severity='HIGH',
-                                        description=f'Bucket allows public {permission.lower()} access',
-                                        region=region,
-                                        remediation='Remove public ACL permissions'
-                                    ))
+                        location_response = await s3_client.get_bucket_location(Bucket=bucket_name)
+                        bucket_region = location_response.get('LocationConstraint') or 'us-east-1'
+                        if bucket_region == 'EU':
+                            bucket_region = 'eu-west-1'
+                    except Exception:
+                        bucket_region = 'us-east-1'
                     
-                    except Exception as e:
-                        # Access denied or other error - skip this bucket
-                        continue
+                    # Create region-specific client for this bucket
+                    async with session.client('s3', region_name=bucket_region) as bucket_s3_client:
                         
-                    # Check bucket policy for public access
-                    try:
-                        policy_response = await s3_client.get_bucket_policy(Bucket=bucket_name)
-                        policy = policy_response.get('Policy', '')
-                        
-                        # Simple check for wildcard principals
-                        if '"Principal": "*"' in policy or '"Principal":"*"' in policy:
+                        # Check bucket-level public access block
+                        try:
+                            bucket_pab = await bucket_s3_client.get_public_access_block(Bucket=bucket_name)
+                            pab_config = bucket_pab.get('PublicAccessBlockConfiguration', {})
+                            
+                            if not all([
+                                pab_config.get('BlockPublicAcls', False),
+                                pab_config.get('IgnorePublicAcls', False),
+                                pab_config.get('BlockPublicPolicy', False),
+                                pab_config.get('RestrictPublicBuckets', False)
+                            ]):
+                                findings.append(SecurityFinding(
+                                    resource_type='S3',
+                                    resource_id=bucket_name,
+                                    finding_type='BUCKET_PUBLIC_ACCESS_BLOCK',
+                                    severity='MEDIUM',
+                                    description='Bucket public access block is not fully configured',
+                                    region=bucket_region,
+                                    remediation='Enable all bucket-level public access block settings'
+                                ))
+                        except Exception:
+                            # No bucket-level public access block configured
                             findings.append(SecurityFinding(
                                 resource_type='S3',
                                 resource_id=bucket_name,
-                                finding_type='PUBLIC_POLICY',
-                                severity='HIGH',
-                                description='Bucket policy allows public access via wildcard principal',
-                                region=region,
-                                remediation='Review and restrict bucket policy'
+                                finding_type='NO_BUCKET_PUBLIC_ACCESS_BLOCK',
+                                severity='MEDIUM',
+                                description='Bucket public access block is not configured',
+                                region=bucket_region,
+                                remediation='Configure bucket-level public access block settings'
                             ))
+                        
+                        # Check versioning status
+                        try:
+                            versioning = await bucket_s3_client.get_bucket_versioning(Bucket=bucket_name)
+                            versioning_status = versioning.get('Status', 'Off')
+                            mfa_delete = versioning.get('MfaDelete', 'Disabled')
                             
-                    except Exception:
-                        # No policy or access denied - continue
-                        pass
+                            if versioning_status != 'Enabled':
+                                findings.append(SecurityFinding(
+                                    resource_type='S3',
+                                    resource_id=bucket_name,
+                                    finding_type='VERSIONING_DISABLED',
+                                    severity='MEDIUM',
+                                    description='Bucket versioning is not enabled - data protection risk',
+                                    region=bucket_region,
+                                    remediation='Enable S3 bucket versioning for data protection'
+                                ))
+                            
+                            if versioning_status == 'Enabled' and mfa_delete != 'Enabled':
+                                findings.append(SecurityFinding(
+                                    resource_type='S3',
+                                    resource_id=bucket_name,
+                                    finding_type='MFA_DELETE_DISABLED',
+                                    severity='LOW',
+                                    description='MFA delete is not enabled for versioned bucket',
+                                    region=bucket_region,
+                                    remediation='Consider enabling MFA delete for additional protection'
+                                ))
+                        except Exception:
+                            continue
                         
-                    # Check encryption
-                    try:
-                        encryption = await s3_client.get_bucket_encryption(Bucket=bucket_name)
-                    except Exception:
-                        # No encryption configured
-                        findings.append(SecurityFinding(
-                            resource_type='S3',
-                            resource_id=bucket_name,
-                            finding_type='NO_ENCRYPTION',
-                            severity='MEDIUM',
-                            description='Bucket does not have server-side encryption enabled',
-                            region=region,
-                            remediation='Enable S3 server-side encryption'
-                        ))
+                        # Check lifecycle policies
+                        try:
+                            lifecycle = await bucket_s3_client.get_bucket_lifecycle_configuration(Bucket=bucket_name)
+                            # Lifecycle is configured - good for cost optimization
+                        except Exception:
+                            # No lifecycle policy configured
+                            findings.append(SecurityFinding(
+                                resource_type='S3',
+                                resource_id=bucket_name,
+                                finding_type='NO_LIFECYCLE_POLICY',
+                                severity='LOW',
+                                description='No lifecycle policy configured - potential cost optimization missed',
+                                region=bucket_region,
+                                remediation='Configure lifecycle policy to optimize storage costs'
+                            ))
                         
+                        # Enhanced encryption analysis
+                        try:
+                            encryption = await bucket_s3_client.get_bucket_encryption(Bucket=bucket_name)
+                            encryption_config = encryption.get('ServerSideEncryptionConfiguration', {})
+                            rules = encryption_config.get('Rules', [])
+                            
+                            if rules:
+                                for rule in rules:
+                                    sse_config = rule.get('ApplyServerSideEncryptionByDefault', {})
+                                    sse_algorithm = sse_config.get('SSEAlgorithm', '')
+                                    kms_key_id = sse_config.get('KMSMasterKeyID', '')
+                                    
+                                    if sse_algorithm == 'AES256':
+                                        findings.append(SecurityFinding(
+                                            resource_type='S3',
+                                            resource_id=bucket_name,
+                                            finding_type='S3_MANAGED_ENCRYPTION',
+                                            severity='LOW',
+                                            description='Using S3-managed encryption (AES256) instead of KMS',
+                                            region=bucket_region,
+                                            remediation='Consider upgrading to KMS encryption for better key management'
+                                        ))
+                                    elif sse_algorithm == 'aws:kms':
+                                        if not kms_key_id or kms_key_id.startswith('arn:aws:kms'):
+                                            # Using customer-managed KMS key - good!
+                                            pass
+                                        else:
+                                            # Using AWS managed key
+                                            findings.append(SecurityFinding(
+                                                resource_type='S3',
+                                                resource_id=bucket_name,
+                                                finding_type='AWS_MANAGED_KMS_KEY',
+                                                severity='LOW',
+                                                description='Using AWS-managed KMS key instead of customer-managed key',
+                                                region=bucket_region,
+                                                remediation='Consider using customer-managed KMS key for better control'
+                                            ))
+                        except Exception:
+                            # No encryption configured - already handled in original code
+                            findings.append(SecurityFinding(
+                                resource_type='S3',
+                                resource_id=bucket_name,
+                                finding_type='NO_ENCRYPTION',
+                                severity='HIGH',
+                                description='Bucket does not have server-side encryption enabled',
+                                region=bucket_region,
+                                remediation='Enable S3 server-side encryption with KMS'
+                            ))
+                        
+                        # Check access logging
+                        try:
+                            logging_config = await bucket_s3_client.get_bucket_logging(Bucket=bucket_name)
+                            if not logging_config.get('LoggingEnabled'):
+                                findings.append(SecurityFinding(
+                                    resource_type='S3',
+                                    resource_id=bucket_name,
+                                    finding_type='NO_ACCESS_LOGGING',
+                                    severity='MEDIUM',
+                                    description='Bucket access logging is not enabled',
+                                    region=bucket_region,
+                                    remediation='Enable S3 access logging for audit trail'
+                                ))
+                        except Exception:
+                            # No logging configured
+                            findings.append(SecurityFinding(
+                                resource_type='S3',
+                                resource_id=bucket_name,
+                                finding_type='NO_ACCESS_LOGGING',
+                                severity='MEDIUM',
+                                description='Bucket access logging is not enabled',
+                                region=bucket_region,
+                                remediation='Enable S3 access logging for audit trail'
+                            ))
+                        
+                        # Enhanced ACL analysis - existing code
+                        try:
+                            acl = await bucket_s3_client.get_bucket_acl(Bucket=bucket_name)
+                            for grant in acl.get('Grants', []):
+                                grantee = grant.get('Grantee', {})
+                                
+                                # Check for public read access
+                                if (grantee.get('Type') == 'Group' and 
+                                    grantee.get('URI') in [
+                                        'http://acs.amazonaws.com/groups/global/AllUsers',
+                                        'http://acs.amazonaws.com/groups/global/AuthenticatedUsers'
+                                    ]):
+                                    
+                                    permission = grant.get('Permission')
+                                    if permission in ['READ', 'FULL_CONTROL']:
+                                        findings.append(SecurityFinding(
+                                            resource_type='S3',
+                                            resource_id=bucket_name,
+                                            finding_type='PUBLIC_ACL',
+                                            severity='HIGH',
+                                            description=f'Bucket ACL allows public {permission.lower()} access',
+                                            region=bucket_region,
+                                            remediation='Remove public ACL permissions'
+                                        ))
+                                    elif permission in ['WRITE', 'WRITE_ACP']:
+                                        findings.append(SecurityFinding(
+                                            resource_type='S3',
+                                            resource_id=bucket_name,
+                                            finding_type='PUBLIC_WRITE_ACL',
+                                            severity='HIGH',
+                                            description=f'Bucket ACL allows public {permission.lower()} access',
+                                            region=bucket_region,
+                                            remediation='Remove public write ACL permissions immediately'
+                                        ))
+                        except Exception:
+                            continue
+                            
+                        # Enhanced bucket policy check - existing code  
+                        try:
+                            policy_response = await bucket_s3_client.get_bucket_policy(Bucket=bucket_name)
+                            policy = policy_response.get('Policy', '')
+                            
+                            # Enhanced wildcard principal check
+                            if '"Principal": "*"' in policy or '"Principal":"*"' in policy:
+                                findings.append(SecurityFinding(
+                                    resource_type='S3',
+                                    resource_id=bucket_name,
+                                    finding_type='PUBLIC_POLICY',
+                                    severity='HIGH',
+                                    description='Bucket policy allows public access via wildcard principal',
+                                    region=bucket_region,
+                                    remediation='Review and restrict bucket policy to specific principals'
+                                ))
+                            
+                            # Check for unsecured transport
+                            if '"aws:SecureTransport": "false"' not in policy.lower():
+                                findings.append(SecurityFinding(
+                                    resource_type='S3',
+                                    resource_id=bucket_name,
+                                    finding_type='INSECURE_TRANSPORT_ALLOWED',
+                                    severity='MEDIUM',
+                                    description='Bucket policy does not enforce HTTPS/TLS',
+                                    region=bucket_region,
+                                    remediation='Add policy condition to deny requests without SecureTransport'
+                                ))
+                                
+                        except Exception:
+                            # No policy or access denied - continue
+                            pass
+                            
                 except Exception as e:
                     # Skip buckets we can't access
                     continue
