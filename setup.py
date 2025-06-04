@@ -17,7 +17,7 @@ setup(
     description="AWS Super CLI - Multi-account AWS resource discovery with service-level cost intelligence",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/marceloacosta/awsx",
+    url="https://github.com/marceloacosta/aws-super-cli",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
@@ -43,7 +43,7 @@ setup(
     },
     keywords="aws, cli, multi-account, devops, cloud, infrastructure",
     project_urls={
-        "Bug Reports": "https://github.com/marceloacosta/awsx/issues",
-        "Source": "https://github.com/marceloacosta/awsx",
+        "Bug Reports": "https://github.com/marceloacosta/aws-super-cli/issues",
+        "Source": "https://github.com/marceloacosta/aws-super-cli",
     },
 ) 
