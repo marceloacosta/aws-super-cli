@@ -4,18 +4,18 @@
 
 ## What is AWS Super CLI?
 
-AWS Super CLI is a command-line tool for AWS security auditing, resource discovery, and intelligent multi-account management. It solves the key problems engineers face:
+AWS Super CLI is a command-line tool for AWS security auditing, resource discovery, and advanced multi-account management. It solves the key problems engineers face:
 
 1. **AWS security misconfigurations**: Comprehensive security auditing across S3, IAM, and network infrastructure
 2. **Multi-account complexity**: Smart account categorization, health monitoring, and unified management
-3. **ARN complexity**: Intelligent ARN display with human-readable names and smart truncation
+3. **ARN complexity**: Human-readable ARN display with smart truncation and explanation capabilities
 4. **Service-level cost intelligence**: Get detailed cost analysis with credit allocation per service
 
-Unlike other tools that focus on single concerns, AWS Super CLI provides enterprise-grade security auditing with intelligent multi-account management and cost intelligence in one unified interface.
+Unlike other tools that focus on single concerns, AWS Super CLI provides enterprise-grade security auditing with advanced multi-account management and cost analysis in one unified interface.
 
 **Unique features**: 
-- **Account Intelligence** - Smart categorization, health monitoring, and nickname management across AWS accounts
-- **ARN Intelligence** - Human-readable ARN display with smart truncation and explanation capabilities
+- **Account Management** - Smart categorization, health monitoring, and nickname management across AWS accounts
+- **ARN Utilities** - Human-readable ARN display with smart truncation and explanation capabilities
 - **Network security auditing** - Detect SSH/RDP open to world, overly permissive security groups
 - **Service-level credit usage analysis** - See exactly which AWS services consume promotional credits
 - **Multi-account security posture** - Unified security scoring across AWS organizations
@@ -45,9 +45,9 @@ aws-super-cli cost summary
 aws-super-cli explain arn:aws:iam::123456789012:user/john-doe
 ```
 
-## Multi-Account Intelligence
+## Advanced Multi-Account Management
 
-AWS Super CLI provides intelligent multi-account management with automatic categorization and health monitoring:
+AWS Super CLI provides advanced multi-account management with automatic categorization and health monitoring:
 
 ### Account Management Commands
 
@@ -59,7 +59,7 @@ aws-super-cli accounts-health              # Detailed health reporting
 aws-super-cli accounts-nickname myprofile "Production Environment"  # Set nicknames
 ```
 
-### Account Intelligence Features
+### Account Management Features
 
 **Smart Categorization:**
 - Automatic environment detection (production, staging, development, security, etc.)
@@ -79,7 +79,7 @@ aws-super-cli accounts-nickname myprofile "Production Environment"  # Set nickna
 ### Example Account Output
 
 ```
-AWS Account Intelligence
+AWS Account Management
 
                                      AWS Accounts & Profiles                                      
 ┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -100,11 +100,11 @@ Categories:
   development: 1 accounts
 ```
 
-## ARN Intelligence
+## ARN Utilities
 
-AWS Super CLI provides intelligent ARN handling to make long AWS resource names manageable:
+AWS Super CLI provides smart ARN handling to make long AWS resource names manageable:
 
-### ARN Intelligence Commands
+### ARN Utility Commands
 
 ```bash
 aws-super-cli explain arn:aws:iam::123456789012:user/john-doe  # Explain ARN components
@@ -112,7 +112,7 @@ aws-super-cli ls iam                                          # Smart ARN displa
 aws-super-cli ls iam --show-full-arns                        # Show complete ARNs
 ```
 
-### ARN Intelligence Features
+### ARN Utility Features
 
 **Smart Display:**
 - Human-readable names by default (e.g., "john-doe" instead of full ARN)
@@ -261,8 +261,8 @@ Top Services by Credit Usage
 
 ## Supported Services
 
-| Service | Command | Multi-Account | Security Audit | Account Intelligence | ARN Intelligence |
-|---------|---------|---------------|----------------|---------------------|------------------|
+| Service | Command | Multi-Account | Security Audit | Account Management | ARN Utilities |
+|---------|---------|---------------|----------------|--------------------|---------------|
 | **Account Management** | `aws-super-cli accounts` | ✅ | N/A | ✅ | N/A |
 | **Security Audit** | `aws-super-cli audit` | ✅ | ✅ | N/A | N/A |
 | **ARN Explanation** | `aws-super-cli explain` | N/A | N/A | N/A | ✅ |
@@ -276,10 +276,10 @@ Top Services by Credit Usage
 
 ## Multi-Account Support
 
-aws-super-cli automatically discovers AWS profiles and provides intelligent account management:
+aws-super-cli automatically discovers AWS profiles and provides advanced account management:
 
 ```bash
-# Account intelligence and management
+# Account management and organization
 aws-super-cli accounts                     # Smart account listing with health checks
 aws-super-cli accounts --category production  # Filter by environment type
 aws-super-cli accounts-dashboard           # Comprehensive overview
@@ -297,7 +297,7 @@ aws-super-cli ls rds --accounts "prod-*"   # Pattern matching
 **Account management:**
 ```bash
 # Smart account organization
-aws-super-cli accounts                     # List with intelligent categorization
+aws-super-cli accounts                     # List with smart categorization
 aws-super-cli accounts --category production  # Focus on production accounts
 aws-super-cli accounts-nickname prod "Production Environment"  # Set friendly names
 aws-super-cli accounts-dashboard           # Comprehensive account overview
@@ -307,7 +307,7 @@ aws-super-cli accounts-health              # Detailed health assessment
 aws-super-cli accounts --no-health-check   # Fast listing without health checks
 ```
 
-**ARN intelligence:**
+**ARN utilities:**
 ```bash
 # Human-readable ARN display
 aws-super-cli ls iam                       # Smart ARN truncation (default)
@@ -366,8 +366,8 @@ aws-super-cli cost by-account
 
 | Feature | AWS CLI v2 | AWS Super CLI | Other Tools |
 |---------|------------|------|-------------|
-| Account intelligence | None | Smart categorization & health | None |
-| ARN intelligence | None | Human-readable display | None |
+| Account management | None | Smart categorization & health | None |
+| ARN utilities | None | Human-readable display | None |
 | Security auditing | None | Comprehensive | Basic/None |
 | Network security analysis | None | Advanced | Limited |
 | Multi-account queries | Manual switching | Automatic parallel | Varies |
@@ -376,7 +376,7 @@ aws-super-cli cost by-account
 | Credit tracking | None | Service-level | None |
 | Setup complexity | Medium | Zero config | High |
 
-**AWS Super CLI is the only tool that provides comprehensive account intelligence, ARN intelligence, and security auditing with service-level credit usage analysis.**
+**AWS Super CLI is the only tool that provides comprehensive account management, ARN utilities, and security auditing with service-level credit usage analysis.**
 
 ## Technical Details
 
