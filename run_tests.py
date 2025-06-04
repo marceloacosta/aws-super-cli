@@ -72,7 +72,7 @@ def run_tests(test_type='all', verbose=False, coverage=False):
     
     if coverage:
         cmd.extend([
-            '--cov=awsx',
+            '--cov=aws_super_cli',
             '--cov-report=html',
             '--cov-report=term-missing'
         ])
@@ -101,8 +101,8 @@ def run_quick_smoke_tests():
     print("🔥 Running quick smoke tests...")
     
     smoke_tests = [
-        ['python', '-c', 'from awsx.cli import app; print("✓ CLI imports successfully")'],
-        ['python', '-c', 'from awsx.aws import aws_session; print("✓ AWS session imports successfully")'],
+        ['python', '-c', 'from aws_super_cli.cli import app; print("✓ CLI imports successfully")'],
+        ['python', '-c', 'from aws_super_cli.aws import aws_session; print("✓ AWS session imports successfully")'],
         ['aws-super-cli', '--help'],
     ]
     
@@ -127,7 +127,7 @@ def run_regression_verification():
         'python', '-c', 
         '''
 from typer.testing import CliRunner
-from awsx.cli import app
+from aws_super_cli.cli import app
 runner = CliRunner()
 result = runner.invoke(app, ["help"])
 assert "[cyan]" not in result.stdout, "Rich markup regression detected!"

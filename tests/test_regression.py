@@ -6,7 +6,7 @@ Tests for specific bugs and issues that have been fixed
 
 import pytest
 from typer.testing import CliRunner
-from awsx.cli import app
+from aws_super_cli.cli import app
 from unittest.mock import patch
 
 
@@ -285,6 +285,112 @@ class TestNetworkSecurityFeatures:
         
         # Should mention network in services help text
         assert "s3, iam, network" in result.stdout, "Audit help should list network as available service"
+
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary') 
+    def test_audit_services_help_mentions_compute(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: Audit command help should mention compute service
+        
+        When users run audit --help, they should see compute as an option
+        """
+        result = self.runner.invoke(app, ["audit", "--help"])
+        assert result.exit_code == 0
+        
+        # Should mention compute in services help text
+        assert "s3, iam, network, compute" in result.stdout, "Audit help should list compute as available service"
+
+
+class TestComputeSecurityFeatures:
+    """Regression tests for compute security audit functionality"""
+    
+    def setup_method(self):
+        self.runner = CliRunner()
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_compute_service_in_default_audit(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: Ensure compute service is included in default audit
+        
+        Compute security audit should be part of the default audit services
+        """
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 100,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--summary"])
+        assert result.exit_code == 0
+        
+        # Verify compute is in default services
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert 'compute' in services, "Compute service should be in default audit services"
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_compute_only_audit_works(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: Compute-only audit should work correctly
+        
+        Should be able to run audit with only compute service
+        """
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 85,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--services", "compute", "--summary"])
+        assert result.exit_code == 0
+        assert "Security Audit Summary" in result.stdout
+        
+        # Verify only compute service was called
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert services == ['compute'], "Should only audit compute service when explicitly specified"
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_compute_audit_with_other_services(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: Compute audit should work in combination with other services
+        
+        Should be able to run audit with compute and other services
+        """
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 75,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--services", "s3,compute", "--summary"])
+        assert result.exit_code == 0
+        assert "Security Audit Summary" in result.stdout
+        
+        # Verify both services were called
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert 's3' in services, "S3 service should be included"
+        assert 'compute' in services, "Compute service should be included"
+        assert len(services) == 2, "Should only include the two specified services"
 
 
 if __name__ == "__main__":

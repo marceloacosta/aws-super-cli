@@ -38,7 +38,7 @@ setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "aws-super-cli=awsx.cli:app",
+            "aws-super-cli=aws_super_cli.cli:app",
         ],
     },
     keywords="aws, cli, multi-account, devops, cloud, infrastructure",

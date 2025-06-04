@@ -639,7 +639,7 @@ async def run_security_audit(
     all_findings = []
     
     if not services:
-        services = ['s3', 'iam', 'network']  # Default services to audit
+        services = ['s3', 'iam', 'network', 'compute']  # Default services to audit
     
     console = Console()
     
@@ -665,6 +665,12 @@ async def run_security_audit(
             console.print("[dim]Auditing network security (VPCs, Security Groups, NACLs)...[/dim]")
             network_findings = await audit_network_security(regions, all_regions)
             all_findings.extend(network_findings)
+        
+        # Run Compute security audit if requested
+        if 'compute' in services:
+            console.print("[dim]Auditing compute security (EC2, Lambda, Containers)...[/dim]")
+            compute_findings = await audit_compute_security(regions, all_regions)
+            all_findings.extend(compute_findings)
     
     return all_findings
 
@@ -1119,5 +1125,426 @@ async def _audit_subnets(ec2_client, region: str) -> List[SecurityFinding]:
     
     except Exception as e:
         rprint(f"[red]Error auditing subnets in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def audit_compute_security(regions: List[str] = None, all_regions: bool = True) -> List[SecurityFinding]:
+    """Audit compute security - EC2, Lambda, and Container security"""
+    findings = []
+    
+    if not regions:
+        if all_regions:
+            # Get all available regions
+            session = aioboto3.Session()
+            async with session.client('ec2', region_name='us-east-1') as ec2_client:
+                regions_response = await ec2_client.describe_regions()
+                regions = [region['RegionName'] for region in regions_response['Regions']]
+        else:
+            regions = ['us-east-1']  # Default region
+    
+    for region in regions:
+        region_findings = await _audit_compute_security_region(region)
+        findings.extend(region_findings)
+    
+    return findings
+
+
+async def _audit_compute_security_region(region: str) -> List[SecurityFinding]:
+    """Audit compute security for a specific region"""
+    findings = []
+    
+    try:
+        session = aioboto3.Session()
+        
+        # Audit EC2 instances
+        async with session.client('ec2', region_name=region) as ec2_client:
+            ec2_findings = await _audit_ec2_instances(ec2_client, region)
+            findings.extend(ec2_findings)
+        
+        # Audit Lambda functions
+        async with session.client('lambda', region_name=region) as lambda_client:
+            lambda_findings = await _audit_lambda_functions(lambda_client, region)
+            findings.extend(lambda_findings)
+        
+        # Audit ECS clusters and services
+        async with session.client('ecs', region_name=region) as ecs_client:
+            ecs_findings = await _audit_ecs_security(ecs_client, region)
+            findings.extend(ecs_findings)
+            
+    except Exception as e:
+        rprint(f"[red]Error auditing compute security in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_ec2_instances(ec2_client, region: str) -> List[SecurityFinding]:
+    """Audit EC2 instances for security misconfigurations"""
+    findings = []
+    
+    try:
+        # Get all EC2 instances
+        paginator = ec2_client.get_paginator('describe_instances')
+        
+        async for page in paginator.paginate():
+            reservations = page.get('Reservations', [])
+            
+            for reservation in reservations:
+                instances = reservation.get('Instances', [])
+                
+                for instance in instances:
+                    instance_id = instance.get('InstanceId', 'Unknown')
+                    instance_state = instance.get('State', {}).get('Name', 'unknown')
+                    
+                    # Skip terminated instances
+                    if instance_state == 'terminated':
+                        continue
+                    
+                    # Check for public IP exposure
+                    public_ip = instance.get('PublicIpAddress')
+                    public_dns = instance.get('PublicDnsName')
+                    
+                    if public_ip or public_dns:
+                        # Check if instance has restrictive security groups
+                        security_groups = instance.get('SecurityGroups', [])
+                        has_restrictive_sg = False
+                        
+                        for sg in security_groups:
+                            sg_id = sg.get('GroupId')
+                            try:
+                                sg_details = await ec2_client.describe_security_groups(GroupIds=[sg_id])
+                                sg_rules = sg_details['SecurityGroups'][0].get('IpPermissions', [])
+                                
+                                # Check if any rule allows SSH/RDP from anywhere
+                                for rule in sg_rules:
+                                    protocol = rule.get('IpProtocol', '')
+                                    from_port = rule.get('FromPort')
+                                    to_port = rule.get('ToPort')
+                                    
+                                    if ((protocol == 'tcp' and from_port == 22 and to_port == 22) or
+                                        (protocol == 'tcp' and from_port == 3389 and to_port == 3389)):
+                                        
+                                        for ip_range in rule.get('IpRanges', []):
+                                            if ip_range.get('CidrIp') == '0.0.0.0/0':
+                                                findings.append(SecurityFinding(
+                                                    resource_type='EC2',
+                                                    resource_id=instance_id,
+                                                    finding_type='PUBLIC_INSTANCE_OPEN_ACCESS',
+                                                    severity='HIGH',
+                                                    description=f'Public EC2 instance allows {"SSH" if from_port == 22 else "RDP"} from anywhere',
+                                                    region=region,
+                                                    remediation='Restrict security group rules or move to private subnet'
+                                                ))
+                            except Exception:
+                                continue
+                        
+                        # General public IP exposure warning
+                        findings.append(SecurityFinding(
+                            resource_type='EC2',
+                            resource_id=instance_id,
+                            finding_type='PUBLIC_IP_EXPOSURE',
+                            severity='MEDIUM',
+                            description='EC2 instance has public IP address - review necessity',
+                            region=region,
+                            remediation='Consider using private subnets with NAT Gateway if public access not required'
+                        ))
+                    
+                    # Check IMDSv2 enforcement
+                    metadata_options = instance.get('MetadataOptions', {})
+                    http_tokens = metadata_options.get('HttpTokens', 'optional')
+                    
+                    if http_tokens != 'required':
+                        findings.append(SecurityFinding(
+                            resource_type='EC2',
+                            resource_id=instance_id,
+                            finding_type='IMDSV2_NOT_ENFORCED',
+                            severity='MEDIUM',
+                            description='EC2 instance does not enforce IMDSv2 (Instance Metadata Service v2)',
+                            region=region,
+                            remediation='Enable IMDSv2 enforcement to prevent SSRF attacks'
+                        ))
+                    
+                    # Check for instances using default security group
+                    for sg in security_groups:
+                        if sg.get('GroupName') == 'default':
+                            findings.append(SecurityFinding(
+                                resource_type='EC2',
+                                resource_id=instance_id,
+                                finding_type='DEFAULT_SECURITY_GROUP',
+                                severity='LOW',
+                                description='EC2 instance uses default security group',
+                                region=region,
+                                remediation='Create custom security groups with least privilege access'
+                            ))
+                    
+                    # Check for instances without key pairs (if running)
+                    if instance_state == 'running' and not instance.get('KeyName'):
+                        findings.append(SecurityFinding(
+                            resource_type='EC2',
+                            resource_id=instance_id,
+                            finding_type='NO_KEY_PAIR',
+                            severity='LOW',
+                            description='Running EC2 instance has no key pair assigned',
+                            region=region,
+                            remediation='Assign key pair for secure access or use Systems Manager Session Manager'
+                        ))
+                    
+                    # Check for public AMI usage
+                    image_id = instance.get('ImageId')
+                    if image_id:
+                        try:
+                            image_details = await ec2_client.describe_images(ImageIds=[image_id])
+                            if image_details.get('Images'):
+                                image = image_details['Images'][0]
+                                if image.get('Public', False):
+                                    findings.append(SecurityFinding(
+                                        resource_type='EC2',
+                                        resource_id=instance_id,
+                                        finding_type='PUBLIC_AMI_USAGE',
+                                        severity='LOW',
+                                        description=f'EC2 instance uses public AMI: {image_id}',
+                                        region=region,
+                                        remediation='Consider using private AMIs or verified public AMIs from trusted sources'
+                                    ))
+                        except Exception:
+                            # AMI might not exist anymore or access denied
+                            pass
+                            
+    except Exception as e:
+        rprint(f"[red]Error auditing EC2 instances in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_lambda_functions(lambda_client, region: str) -> List[SecurityFinding]:
+    """Audit Lambda functions for security misconfigurations"""
+    findings = []
+    
+    try:
+        # Get all Lambda functions
+        paginator = lambda_client.get_paginator('list_functions')
+        
+        async for page in paginator.paginate():
+            functions = page.get('Functions', [])
+            
+            for function in functions:
+                function_name = function.get('FunctionName', 'Unknown')
+                function_arn = function.get('FunctionArn', '')
+                
+                # Check function permissions/policy
+                try:
+                    policy_response = await lambda_client.get_policy(FunctionName=function_name)
+                    policy = policy_response.get('Policy', '')
+                    
+                    # Check for overly permissive policies
+                    if '"Principal": "*"' in policy:
+                        findings.append(SecurityFinding(
+                            resource_type='Lambda',
+                            resource_id=function_name,
+                            finding_type='PUBLIC_LAMBDA_FUNCTION',
+                            severity='HIGH',
+                            description='Lambda function allows public access via wildcard principal',
+                            region=region,
+                            remediation='Restrict function policy to specific principals'
+                        ))
+                        
+                except Exception:
+                    # No policy attached or access denied - this is actually good
+                    pass
+                
+                # Check environment variables encryption
+                environment = function.get('Environment', {})
+                if environment.get('Variables') and not environment.get('KMSKeyArn'):
+                    findings.append(SecurityFinding(
+                        resource_type='Lambda',
+                        resource_id=function_name,
+                        finding_type='UNENCRYPTED_ENV_VARS',
+                        severity='MEDIUM',
+                        description='Lambda function environment variables are not encrypted with customer KMS key',
+                        region=region,
+                        remediation='Enable KMS encryption for environment variables'
+                    ))
+                
+                # Check VPC configuration
+                vpc_config = function.get('VpcConfig', {})
+                if not vpc_config.get('VpcId'):
+                    # Function not in VPC - could be intentional, but worth noting
+                    findings.append(SecurityFinding(
+                        resource_type='Lambda',
+                        resource_id=function_name,
+                        finding_type='LAMBDA_NOT_IN_VPC',
+                        severity='LOW',
+                        description='Lambda function is not configured to run in VPC',
+                        region=region,
+                        remediation='Consider VPC configuration if function needs to access VPC resources securely'
+                    ))
+                
+                # Check dead letter queue configuration
+                dead_letter_config = function.get('DeadLetterConfig', {})
+                if not dead_letter_config.get('TargetArn'):
+                    findings.append(SecurityFinding(
+                        resource_type='Lambda',
+                        resource_id=function_name,
+                        finding_type='NO_DEAD_LETTER_QUEUE',
+                        severity='LOW',
+                        description='Lambda function does not have dead letter queue configured',
+                        region=region,
+                        remediation='Configure dead letter queue for error handling and monitoring'
+                    ))
+                
+                # Check function execution role permissions
+                role_arn = function.get('Role', '')
+                if role_arn:
+                    # Extract role name from ARN
+                    role_name = role_arn.split('/')[-1] if '/' in role_arn else role_arn
+                    
+                    # Check if role has admin permissions (this would require IAM client)
+                    # For now, we'll flag functions with roles that contain 'admin' in the name
+                    if 'admin' in role_name.lower():
+                        findings.append(SecurityFinding(
+                            resource_type='Lambda',
+                            resource_id=function_name,
+                            finding_type='OVERPRIVILEGED_EXECUTION_ROLE',
+                            severity='MEDIUM',
+                            description=f'Lambda function uses potentially overprivileged execution role: {role_name}',
+                            region=region,
+                            remediation='Review and apply least privilege principle to execution role'
+                        ))
+                
+                # Check runtime version
+                runtime = function.get('Runtime', '')
+                if runtime:
+                    # Flag deprecated runtimes (this list should be updated periodically)
+                    deprecated_runtimes = [
+                        'python2.7', 'python3.6', 'nodejs8.10', 'nodejs10.x', 
+                        'dotnetcore2.1', 'ruby2.5', 'go1.x'
+                    ]
+                    
+                    if runtime in deprecated_runtimes:
+                        findings.append(SecurityFinding(
+                            resource_type='Lambda',
+                            resource_id=function_name,
+                            finding_type='DEPRECATED_RUNTIME',
+                            severity='MEDIUM',
+                            description=f'Lambda function uses deprecated runtime: {runtime}',
+                            region=region,
+                            remediation='Update to a supported runtime version'
+                        ))
+                        
+    except Exception as e:
+        rprint(f"[red]Error auditing Lambda functions in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_ecs_security(ecs_client, region: str) -> List[SecurityFinding]:
+    """Audit ECS clusters and services for security misconfigurations"""
+    findings = []
+    
+    try:
+        # Get all ECS clusters
+        clusters_response = await ecs_client.list_clusters()
+        cluster_arns = clusters_response.get('clusterArns', [])
+        
+        if not cluster_arns:
+            return findings  # No ECS clusters in this region
+        
+        # Get cluster details
+        clusters_details = await ecs_client.describe_clusters(clusters=cluster_arns)
+        clusters = clusters_details.get('clusters', [])
+        
+        for cluster in clusters:
+            cluster_name = cluster.get('clusterName', 'Unknown')
+            cluster_arn = cluster.get('clusterArn', '')
+            
+            # Check container insights
+            settings = cluster.get('settings', [])
+            container_insights_enabled = any(
+                setting.get('name') == 'containerInsights' and setting.get('value') == 'enabled'
+                for setting in settings
+            )
+            
+            if not container_insights_enabled:
+                findings.append(SecurityFinding(
+                    resource_type='ECS',
+                    resource_id=cluster_name,
+                    finding_type='CONTAINER_INSIGHTS_DISABLED',
+                    severity='LOW',
+                    description='ECS cluster does not have Container Insights enabled',
+                    region=region,
+                    remediation='Enable Container Insights for better monitoring and security visibility'
+                ))
+            
+            # Get services in this cluster
+            try:
+                services_response = await ecs_client.list_services(cluster=cluster_arn)
+                service_arns = services_response.get('serviceArns', [])
+                
+                if service_arns:
+                    services_details = await ecs_client.describe_services(
+                        cluster=cluster_arn,
+                        services=service_arns
+                    )
+                    services = services_details.get('services', [])
+                    
+                    for service in services:
+                        service_name = service.get('serviceName', 'Unknown')
+                        
+                        # Check task definition
+                        task_definition_arn = service.get('taskDefinition', '')
+                        if task_definition_arn:
+                            try:
+                                task_def_response = await ecs_client.describe_task_definition(
+                                    taskDefinition=task_definition_arn
+                                )
+                                task_definition = task_def_response.get('taskDefinition', {})
+                                
+                                # Check if task definition requires privileged containers
+                                container_definitions = task_definition.get('containerDefinitions', [])
+                                for container in container_definitions:
+                                    if container.get('privileged', False):
+                                        findings.append(SecurityFinding(
+                                            resource_type='ECS',
+                                            resource_id=f"{cluster_name}/{service_name}",
+                                            finding_type='PRIVILEGED_CONTAINER',
+                                            severity='HIGH',
+                                            description=f'ECS service uses privileged container: {container.get("name", "unknown")}',
+                                            region=region,
+                                            remediation='Remove privileged flag unless absolutely necessary'
+                                        ))
+                                    
+                                    # Check for containers running as root
+                                    if container.get('user') == 'root' or not container.get('user'):
+                                        findings.append(SecurityFinding(
+                                            resource_type='ECS',
+                                            resource_id=f"{cluster_name}/{service_name}",
+                                            finding_type='CONTAINER_RUNNING_AS_ROOT',
+                                            severity='MEDIUM',
+                                            description=f'ECS container may be running as root: {container.get("name", "unknown")}',
+                                            region=region,
+                                            remediation='Configure container to run as non-root user'
+                                        ))
+                                
+                                # Check network mode
+                                network_mode = task_definition.get('networkMode', 'bridge')
+                                if network_mode == 'host':
+                                    findings.append(SecurityFinding(
+                                        resource_type='ECS',
+                                        resource_id=f"{cluster_name}/{service_name}",
+                                        finding_type='HOST_NETWORK_MODE',
+                                        severity='MEDIUM',
+                                        description='ECS task uses host network mode',
+                                        region=region,
+                                        remediation='Consider using awsvpc network mode for better isolation'
+                                    ))
+                                    
+                            except Exception:
+                                continue
+                                
+            except Exception:
+                continue
+                
+    except Exception as e:
+        rprint(f"[red]Error auditing ECS security in region {region}: {e}[/red]")
     
     return findings 

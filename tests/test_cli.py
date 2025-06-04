@@ -12,8 +12,8 @@ from rich.console import Console
 from io import StringIO
 
 # Import the CLI app and components
-from awsx.cli import app
-from awsx.aws import aws_session
+from aws_super_cli.cli import app
+from aws_super_cli.aws import aws_session
 
 
 class TestCLICommands:
@@ -332,6 +332,56 @@ class TestAuditCommand:
         assert 's3' in services
         assert 'iam' in services
         assert 'network' in services
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_audit_default_services_include_compute(self, mock_summary, mock_audit):
+        """Test that default audit includes compute security"""
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 90,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--summary"])
+        assert result.exit_code == 0
+        
+        # Verify audit was called with default services including compute
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert 's3' in services
+        assert 'iam' in services
+        assert 'network' in services
+        assert 'compute' in services
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_audit_compute_only_audit_works(self, mock_summary, mock_audit):
+        """Test that compute-only audit works correctly"""
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 85,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--services", "compute", "--summary"])
+        assert result.exit_code == 0
+        assert "Security Audit Summary" in result.stdout
+        
+        # Verify only compute service was called
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert services == ['compute'], "Should only audit compute service when explicitly specified"
 
 
 if __name__ == "__main__":

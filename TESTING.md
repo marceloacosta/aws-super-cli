@@ -203,10 +203,10 @@ Expected output:
 
 📦 Testing Import Integrity
 ==================================================
-  ✅ from awsx.cli import app
-  ✅ from awsx.aws import aws_session
-  ✅ from awsx.services import ec2, s3, vpc, rds, elb, iam
-  ✅ from awsx.services import cost, audit
+  ✅ from aws_super_cli.cli import app
+  ✅ from aws_super_cli.aws import aws_session
+  ✅ from aws_super_cli.services import ec2, s3, vpc, rds, elb, iam
+  ✅ from aws_super_cli.services import cost, audit
 
 📋 Testing CLI Basic Functionality
 ==================================================

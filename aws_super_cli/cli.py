@@ -154,9 +154,8 @@ def list_resources(
     # Rest of the existing function logic...
     try:
         if service == "ec2":
-            from awsx.services.ec2 import list_ec2_instances, list_ec2_instances_multi_account
             if all_accounts or accounts:
-                asyncio.run(list_ec2_instances_multi_account(
+                asyncio.run(ec2.list_ec2_instances_multi_account(
                     all_accounts=all_accounts, 
                     account_patterns=accounts.split(',') if accounts else None,
                     regions=region.split(',') if region else None,
@@ -168,7 +167,7 @@ def list_resources(
                     columns=columns.split(',') if columns else None
                 ))
             else:
-                asyncio.run(list_ec2_instances(
+                asyncio.run(ec2.list_ec2_instances(
                     regions=region.split(',') if region else None,
                     all_regions=all_regions,
                     match=match,
@@ -178,42 +177,38 @@ def list_resources(
                     columns=columns.split(',') if columns else None
                 ))
         elif service == "s3":
-            from awsx.services.s3 import list_s3_buckets
-            asyncio.run(list_s3_buckets(match=match))
+            asyncio.run(s3.list_s3_buckets(match=match))
         elif service == "vpc":
-            from awsx.services.vpc import list_vpcs
-            asyncio.run(list_vpcs(
+            asyncio.run(vpc.list_vpcs(
                 regions=region.split(',') if region else None,
                 all_regions=all_regions,
                 match=match
             ))
         elif service == "rds":
-            from awsx.services.rds import list_rds_instances
-            asyncio.run(list_rds_instances(
+            asyncio.run(rds.list_rds_instances(
                 regions=region.split(',') if region else None,
                 all_regions=all_regions,
                 engine=engine,
                 match=match
             ))
         elif service == "lambda":
-            from awsx.services.lambda_service import list_lambda_functions
-            asyncio.run(list_lambda_functions(
+            asyncio.run(lambda_.list_lambda_functions(
                 regions=region.split(',') if region else None,
                 all_regions=all_regions,
                 runtime=runtime,
                 match=match
             ))
         elif service == "elb":
-            from awsx.services.elb import list_load_balancers
-            asyncio.run(list_load_balancers(
+            asyncio.run(elb.list_load_balancers(
                 regions=region.split(',') if region else None,
                 all_regions=all_regions,
-                lb_type=type_filter,
+                type_filter=type_filter,
                 match=match
             ))
         elif service == "iam":
-            from awsx.services.iam import list_iam_resources
-            asyncio.run(list_iam_resources(
+            asyncio.run(iam.list_iam_resources(
+                regions=region.split(',') if region else None,
+                all_regions=all_regions,
                 iam_type=iam_type,
                 match=match
             ))
@@ -697,7 +692,7 @@ def accounts():
 
 @app.command()
 def audit(
-    services: Optional[str] = typer.Option("s3,iam,network", "--services", help="Comma-separated services to audit (s3, iam, network)"),
+    services: Optional[str] = typer.Option("s3,iam,network,compute", "--services", help="Comma-separated services to audit (s3, iam, network, compute)"),
     region: Optional[str] = typer.Option(None, "--region", "-r", help="Specific region to query"),
     all_regions: bool = typer.Option(True, "--all-regions/--no-all-regions", help="Query all regions (default) or current region only"),
     all_accounts: bool = typer.Option(False, "--all-accounts", help="Query all accessible AWS accounts"),
@@ -858,7 +853,7 @@ def help_command():
     rprint("[bold]Security Auditing:[/bold]")
     rprint("  [cyan]aws-super-cli audit --summary[/cyan]           # Quick security overview")
     rprint("  [cyan]aws-super-cli audit --all-accounts[/cyan]      # Audit all accounts")
-    rprint("  [cyan]aws-super-cli audit --services network[/cyan]  # Network security only")
+    rprint("  [cyan]aws-super-cli audit --services compute[/cyan]  # Compute security only")
     rprint("  [cyan]aws-super-cli audit --services s3,iam[/cyan]   # S3 and IAM audit only")
     rprint()
     rprint("[bold]Cost Analysis:[/bold]")
