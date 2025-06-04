@@ -13,6 +13,7 @@ from .services import cost as cost_analysis
 from .services import audit as audit_service
 from .aws import aws_session
 from .utils.arn_intelligence import arn_intelligence
+from .utils.account_intelligence import account_intelligence, AccountCategory
 
 app = typer.Typer(
     name="aws-super-cli",
@@ -409,7 +410,7 @@ def cost(
             
             month_data = asyncio.run(cost_analysis.get_current_month_costs(debug=debug))
             
-            console.print("\n[bold]📅 Current Month Costs[/bold]")
+            console.print("\n[bold]Current Month Costs[/bold]")
             console.print(f"Period: {month_data['period']}")
             console.print(f"Gross Cost (without credits): [green]{month_data['gross_cost']}[/green]")
             console.print(f"Net Cost (with credits):      [blue]{month_data['net_cost']}[/blue]")
@@ -430,7 +431,7 @@ def cost(
             console.print(table)
             
             # Show monthly trend
-            console.print("\n[bold]📈 Monthly Credit Usage Trend[/bold]")
+            console.print("\n[bold]Monthly Credit Usage Trend[/bold]")
             for month_data in credit_analysis['credit_usage_trend']:
                 credits = cost_analysis.format_cost_amount(str(month_data['credits_used']))
                 gross = cost_analysis.format_cost_amount(str(month_data['gross_cost']))
@@ -454,7 +455,7 @@ def cost(
             # Show credit usage by service
             table = cost_analysis.create_credit_usage_table(
                 credit_usage[:limit], 
-                f"💳 Top {min(len(credit_usage), limit)} Services by Credit Usage (Last {days} days)"
+                f"Top {min(len(credit_usage), limit)} Services by Credit Usage (Last {days} days)"
             )
             console.print(table)
             
@@ -465,7 +466,7 @@ def cost(
             # Show highest coverage services
             high_coverage = [s for s in credit_usage if float(s['Credit_Coverage'].replace('%', '')) > 90]
             if high_coverage:
-                console.print(f"\n[cyan]💯 Services with >90% credit coverage:[/cyan]")
+                console.print(f"\n[cyan]Services with >90% credit coverage:[/cyan]")
                 for service in high_coverage[:3]:
                     console.print(f"  • {service['Service']}: {service['Credit_Coverage']} coverage")
             
@@ -628,73 +629,96 @@ def test():
 
 
 @app.command()
-def accounts():
-    """List available AWS accounts and profiles"""
-    console.print("[bold cyan]Available AWS Accounts & Profiles[/bold cyan]")
+def accounts(
+    health_check: bool = typer.Option(True, "--health-check/--no-health-check", help="Perform health checks on accounts"),
+    category: Optional[str] = typer.Option(None, "--category", help="Filter by account category"),
+    show_details: bool = typer.Option(False, "--details", help="Show detailed account information")
+):
+    """List available AWS accounts with intelligent categorization and health checks"""
+    console.print("[bold cyan]AWS Account Intelligence[/bold cyan]")
     console.print()
     
     try:
-        # Discover profiles
-        profiles = aws_session.multi_account.discover_profiles()
+        if health_check:
+            console.print("[dim]Discovering accounts and performing health checks...[/dim]")
+        else:
+            console.print("[dim]Discovering accounts (skipping health checks for speed)...[/dim]")
         
-        if not profiles:
-            console.print("[yellow]No AWS profiles found.[/yellow]")
+        # Get enhanced account information
+        async def get_accounts():
+            return await account_intelligence.get_enhanced_accounts(include_health_check=health_check)
+        
+        enhanced_accounts = asyncio.run(get_accounts())
+        
+        if not enhanced_accounts:
+            console.print("[yellow]No AWS accounts found.[/yellow]")
             console.print("\n[dim]Set up profiles with:[/dim]")
             console.print("  aws configure --profile mycompany")
             console.print("  aws configure sso")
             return
         
-        # Test which profiles are accessible
-        console.print("[dim]Testing profile accessibility...[/dim]")
+        # Filter by category if specified
+        if category:
+            try:
+                filter_category = AccountCategory(category.lower())
+                enhanced_accounts = [acc for acc in enhanced_accounts if acc.category == filter_category]
+                
+                if not enhanced_accounts:
+                    console.print(f"[yellow]No accounts found in category '{category}'[/yellow]")
+                    return
+            except ValueError:
+                console.print(f"[red]Invalid category '{category}'. Valid categories: {', '.join([c.value for c in AccountCategory])}[/red]")
+                return
         
-        async def test_profiles():
-            return await aws_session.multi_account.discover_accounts()
-        
-        accessible_accounts = asyncio.run(test_profiles())
-        accessible_profile_names = {acc['profile'] for acc in accessible_accounts}
-        
-        from rich.table import Table
-        table = Table(title="AWS Profiles", show_header=True, header_style="bold magenta")
-        table.add_column("Profile", style="cyan", min_width=15)
-        table.add_column("Type", style="blue", min_width=10)
-        table.add_column("Account ID", style="green", min_width=12)
-        table.add_column("Status", style="yellow", min_width=10)
-        table.add_column("Description", min_width=30)
-        
-        for profile in profiles:
-            profile_name = profile['name']
-            
-            # Find matching accessible account
-            account_info = next((acc for acc in accessible_accounts if acc['profile'] == profile_name), None)
-            
-            if account_info:
-                status = "[green]✓ Active[/green]"
-                account_id = account_info['account_id']
-            else:
-                status = "[red]✗ Error[/red]"
-                account_id = profile.get('account_id', 'Unknown')
-            
-            table.add_row(
-                profile_name,
-                profile['type'].title(),
-                account_id,
-                status,
-                profile['description']
-            )
-        
+        # Create and display enhanced table
+        table = account_intelligence.create_enhanced_accounts_table(enhanced_accounts)
         console.print(table)
-        console.print(f"\n[green]Found {len(accessible_accounts)} accessible accounts across {len(profiles)} profiles[/green]")
         
-        if accessible_accounts:
-            console.print("\n[bold]Multi-account usage examples:[/bold]")
-            console.print("  aws-super-cli ls ec2 --all-accounts           # Query all accessible accounts")
-            console.print("  aws-super-cli ls s3 --accounts prod-*         # Query accounts matching pattern")
-            console.print("  aws-super-cli cost top-spend                  # Analyze costs across accounts")
-            
-            # Show example with actual profile names
-            example_profiles = [acc['profile'] for acc in accessible_accounts[:2]]
-            if len(example_profiles) >= 2:
-                console.print(f"  aws-super-cli ls vpc --accounts {','.join(example_profiles)} # Query specific accounts")
+        # Summary statistics
+        total_accounts = len(enhanced_accounts)
+        healthy_accounts = len([acc for acc in enhanced_accounts if acc.health.value == 'healthy'])
+        
+        # Group by category for summary
+        categorized = account_intelligence.get_accounts_by_category(enhanced_accounts)
+        
+        console.print(f"\n[bold]Account Summary[/bold]")
+        console.print(f"Total Accounts: {total_accounts}")
+        if health_check:
+            console.print(f"Healthy Accounts: [green]{healthy_accounts}[/green] / {total_accounts}")
+        
+        if len(categorized) > 1:
+            console.print("\n[bold]Categories:[/bold]")
+            for cat, accounts in categorized.items():
+                if cat == AccountCategory.PRODUCTION:
+                    console.print(f"  [red bold]{cat.value}[/red bold]: {len(accounts)} accounts")
+                elif cat == AccountCategory.STAGING:
+                    console.print(f"  [yellow]{cat.value}[/yellow]: {len(accounts)} accounts")
+                elif cat == AccountCategory.DEVELOPMENT:
+                    console.print(f"  [green]{cat.value}[/green]: {len(accounts)} accounts")
+                else:
+                    console.print(f"  {cat.value}: {len(accounts)} accounts")
+        
+        # Enhanced usage examples
+        console.print("\n[bold]Multi-Account Operations:[/bold]")
+        console.print("  [cyan]aws-super-cli accounts --category production[/cyan]      # View production accounts only")
+        console.print("  [cyan]aws-super-cli accounts --no-health-check[/cyan]         # Fast account listing")
+        console.print("  [cyan]aws-super-cli accounts nickname[/cyan]                  # Manage account nicknames")
+        console.print()
+        console.print("  [cyan]aws-super-cli ls ec2 --all-accounts[/cyan]              # Query all accessible accounts")
+        console.print("  [cyan]aws-super-cli audit --all-accounts[/cyan]               # Security audit across accounts")
+        console.print("  [cyan]aws-super-cli ls s3 --accounts prod-*[/cyan]           # Query accounts by pattern")
+        
+        # Show example with actual profile names
+        if len(enhanced_accounts) >= 2:
+            example_profiles = [acc.name for acc in enhanced_accounts[:2]]
+            console.print(f"  [cyan]aws-super-cli ls vpc --accounts {','.join(example_profiles)}[/cyan] # Query specific accounts")
+        
+        # Health warnings
+        if health_check:
+            unhealthy_accounts = [acc for acc in enhanced_accounts if acc.health.value in ['warning', 'error']]
+            if unhealthy_accounts:
+                console.print(f"\n[yellow]Health Issues Found[/yellow]")
+                console.print(f"Run [cyan]aws-super-cli accounts health[/cyan] for detailed health information")
         
     except Exception as e:
         console.print(f"[red]Error discovering accounts: {e}[/red]")
@@ -703,6 +727,213 @@ def accounts():
             console.print("")
             for message in help_messages:
                 console.print(message)
+
+
+@app.command(name="accounts-health", help="Detailed health information for AWS accounts")
+def accounts_health():
+    """Show detailed health information for AWS accounts"""
+    console.print("[bold cyan]AWS Account Health Report[/bold cyan]")
+    console.print()
+    
+    try:
+        console.print("[dim]Performing comprehensive health checks...[/dim]")
+        
+        async def get_health_report():
+            accounts = await account_intelligence.get_enhanced_accounts(include_health_check=True)
+            return accounts
+        
+        accounts = asyncio.run(get_health_report())
+        
+        if not accounts:
+            console.print("[yellow]No accounts found[/yellow]")
+            return
+        
+        # Group by health status
+        healthy = [acc for acc in accounts if acc.health.value == 'healthy']
+        warning = [acc for acc in accounts if acc.health.value == 'warning']
+        error = [acc for acc in accounts if acc.health.value == 'error']
+        unknown = [acc for acc in accounts if acc.health.value == 'unknown']
+        
+        # Health summary
+        console.print(f"[bold]Health Summary:[/bold]")
+        console.print(f"  [green]Healthy: {len(healthy)}[/green]")
+        console.print(f"  [yellow]Warning: {len(warning)}[/yellow]")
+        console.print(f"  [red]Error: {len(error)}[/red]")
+        console.print(f"  [dim]Unknown: {len(unknown)}[/dim]")
+        console.print()
+        
+        # Show problematic accounts first
+        if error:
+            console.print("[red bold]Accounts with Errors:[/red bold]")
+            for account in error:
+                console.print(f"  [red]✗ {account.name}[/red] ({account.account_id})")
+                console.print(f"    Category: {account.category.value}")
+            console.print()
+        
+        if warning:
+            console.print("[yellow bold]Accounts with Warnings:[/yellow bold]")
+            for account in warning:
+                console.print(f"  [yellow]⚠ {account.name}[/yellow] ({account.account_id})")
+                console.print(f"    Category: {account.category.value}")
+            console.print()
+        
+        if healthy:
+            console.print("[green bold]Healthy Accounts:[/green bold]")
+            for account in healthy:
+                console.print(f"  [green]✓ {account.name}[/green] ({account.account_id}) - {account.category.value}")
+        
+        # Recommendations
+        console.print("\n[bold]Recommendations:[/bold]")
+        if error:
+            console.print("  [red]• Fix authentication issues for error accounts[/red]")
+        if warning:
+            console.print("  [yellow]• Review permission configurations for warning accounts[/yellow]")
+        if len(healthy) == len(accounts):
+            console.print("  [green]• All accounts are healthy![/green]")
+        
+    except Exception as e:
+        console.print(f"[red]Error generating health report: {e}[/red]")
+
+
+@app.command(name="accounts-nickname", help="Manage account nicknames")
+def accounts_nickname(
+    profile: Optional[str] = typer.Argument(None, help="Profile name to set nickname for"),
+    nickname: Optional[str] = typer.Argument(None, help="Nickname to set")
+):
+    """Manage account nicknames for easier identification"""
+    
+    if not profile:
+        # Show current nicknames
+        console.print("[bold cyan]Account Nicknames[/bold cyan]")
+        console.print()
+        
+        nicknames = account_intelligence.load_nicknames()
+        
+        if not nicknames:
+            console.print("[yellow]No nicknames set[/yellow]")
+            console.print("\n[dim]Set a nickname with:[/dim]")
+            console.print("  aws-super-cli accounts-nickname myprofile \"My Company Prod\"")
+            return
+        
+        # Show nicknames table
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Profile", style="cyan", min_width=15)
+        table.add_column("Nickname", style="green", min_width=20)
+        
+        for profile_name, nick in nicknames.items():
+            table.add_row(profile_name, nick)
+        
+        console.print(table)
+        console.print(f"\n[green]Found {len(nicknames)} nicknames[/green]")
+        return
+    
+    if not nickname:
+        console.print(f"[red]Please provide a nickname for profile '{profile}'[/red]")
+        console.print(f"[dim]Example: aws-super-cli accounts-nickname {profile} \"My Company Production\"[/dim]")
+        return
+    
+    # Set nickname
+    try:
+        account_intelligence.save_nickname(profile, nickname)
+        console.print(f"[green]Set nickname for '{profile}': [bold]{nickname}[/bold][/green]")
+        console.print(f"\n[dim]Run 'aws-super-cli accounts' to see the updated display[/dim]")
+        
+    except Exception as e:
+        console.print(f"[red]Error setting nickname: {e}[/red]")
+
+
+@app.command(name="accounts-dashboard", help="Show comprehensive account dashboard")
+def accounts_dashboard():
+    """Show comprehensive multi-account dashboard"""
+    console.print("[bold cyan]AWS Multi-Account Dashboard[/bold cyan]")
+    console.print()
+    
+    try:
+        console.print("[dim]Loading account intelligence...[/dim]")
+        
+        async def get_dashboard_data():
+            return await account_intelligence.get_enhanced_accounts(include_health_check=True)
+        
+        accounts = asyncio.run(get_dashboard_data())
+        
+        if not accounts:
+            console.print("[yellow]No accounts found[/yellow]")
+            return
+        
+        # Overall statistics
+        total = len(accounts)
+        healthy = len([acc for acc in accounts if acc.health.value == 'healthy'])
+        
+        console.print(f"[bold]Account Overview[/bold]")
+        console.print(f"Total Accounts: {total}")
+        console.print(f"Health Score: [{'green' if healthy/total > 0.8 else 'yellow' if healthy/total > 0.5 else 'red'}]{healthy}/{total} ({healthy/total*100:.1f}%)[/]")
+        console.print()
+        
+        # Category breakdown
+        categorized = account_intelligence.get_accounts_by_category(accounts)
+        
+        console.print("[bold]Account Categories[/bold]")
+        category_table = Table(show_header=True, header_style="bold magenta")
+        category_table.add_column("Category", style="cyan", min_width=15)
+        category_table.add_column("Count", style="green", min_width=8)
+        category_table.add_column("Health", style="yellow", min_width=12)
+        category_table.add_column("Accounts", min_width=30)
+        
+        for category, cat_accounts in categorized.items():
+            healthy_count = len([acc for acc in cat_accounts if acc.health.value == 'healthy'])
+            account_names = ', '.join([acc.name for acc in cat_accounts[:3]])
+            if len(cat_accounts) > 3:
+                account_names += f" (+{len(cat_accounts)-3} more)"
+            
+            health_display = f"{healthy_count}/{len(cat_accounts)}"
+            if healthy_count == len(cat_accounts):
+                health_display = f"[green]{health_display}[/green]"
+            elif healthy_count == 0:
+                health_display = f"[red]{health_display}[/red]"
+            else:
+                health_display = f"[yellow]{health_display}[/yellow]"
+            
+            category_display = category.value
+            if category == AccountCategory.PRODUCTION:
+                category_display = f"[red bold]{category_display}[/red bold]"
+            elif category == AccountCategory.STAGING:
+                category_display = f"[yellow]{category_display}[/yellow]"
+            elif category == AccountCategory.DEVELOPMENT:
+                category_display = f"[green]{category_display}[/green]"
+            
+            category_table.add_row(
+                category_display,
+                str(len(cat_accounts)),
+                health_display,
+                account_names
+            )
+        
+        console.print(category_table)
+        
+        # Quick actions
+        console.print(f"\n[bold]Quick Actions[/bold]")
+        console.print(f"  [cyan]aws-super-cli accounts --category production[/cyan]      # Focus on production")
+        console.print(f"  [cyan]aws-super-cli audit --all-accounts --summary[/cyan]     # Security overview")
+        console.print(f"  [cyan]aws-super-cli cost by-account[/cyan]                    # Cost breakdown")
+        console.print(f"  [cyan]aws-super-cli accounts-health[/cyan]                    # Detailed health report")
+        
+        # Warnings and recommendations
+        unhealthy = [acc for acc in accounts if acc.health.value in ['warning', 'error']]
+        if unhealthy:
+            console.print(f"\n[yellow]{len(unhealthy)} accounts need attention[/yellow]")
+            console.print(f"Run [cyan]aws-super-cli accounts-health[/cyan] for details")
+        
+        # Production account highlighting
+        prod_accounts = categorized.get(AccountCategory.PRODUCTION, [])
+        if prod_accounts:
+            unhealthy_prod = [acc for acc in prod_accounts if acc.health.value in ['warning', 'error']]
+            if unhealthy_prod:
+                console.print(f"\n[red bold]CRITICAL: {len(unhealthy_prod)} production accounts have health issues![/red bold]")
+            else:
+                console.print(f"\n[green]All {len(prod_accounts)} production accounts are healthy[/green]")
+        
+    except Exception as e:
+        console.print(f"[red]Error generating dashboard: {e}[/red]")
 
 
 @app.command()
@@ -880,6 +1111,13 @@ def help_command():
     rprint("  [cyan]aws-super-cli cost summary[/cyan]              # Overall cost trends")
     rprint("  [cyan]aws-super-cli cost top-spend[/cyan]            # Biggest cost services")
     rprint("  [cyan]aws-super-cli cost credits[/cyan]              # Credit usage analysis")
+    rprint()
+    rprint("[bold]Multi-Account Intelligence:[/bold]")
+    rprint("  [cyan]aws-super-cli accounts[/cyan]                   # Smart account categorization & health")
+    rprint("  [cyan]aws-super-cli accounts --category production[/cyan] # Filter by category") 
+    rprint("  [cyan]aws-super-cli accounts-dashboard[/cyan]         # Comprehensive account overview")
+    rprint("  [cyan]aws-super-cli accounts-health[/cyan]            # Detailed health report")
+    rprint("  [cyan]aws-super-cli accounts-nickname myprofile \"Name\"[/cyan] # Set account nicknames")
     rprint()
     rprint("[bold]For detailed help:[/bold]")
     rprint("  [cyan]aws-super-cli --help[/cyan]                    # Full command reference")

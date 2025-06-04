@@ -4,15 +4,18 @@
 
 ## What is AWS Super CLI?
 
-AWS Super CLI is a command-line tool for AWS security auditing, resource discovery, and cost analysis across multiple accounts. It solves three key problems engineers face:
+AWS Super CLI is a command-line tool for AWS security auditing, resource discovery, and intelligent multi-account management. It solves the key problems engineers face:
 
 1. **AWS security misconfigurations**: Comprehensive security auditing across S3, IAM, and network infrastructure
-2. **Multi-account resource visibility**: See all your AWS resources across accounts in unified tables  
-3. **Service-level cost intelligence**: Get detailed cost analysis with credit allocation per service
+2. **Multi-account complexity**: Smart account categorization, health monitoring, and unified management
+3. **ARN complexity**: Intelligent ARN display with human-readable names and smart truncation
+4. **Service-level cost intelligence**: Get detailed cost analysis with credit allocation per service
 
-Unlike other tools that focus on single concerns, AWS Super CLI provides enterprise-grade security auditing with beautiful resource discovery and cost intelligence in one unified interface.
+Unlike other tools that focus on single concerns, AWS Super CLI provides enterprise-grade security auditing with intelligent multi-account management and cost intelligence in one unified interface.
 
 **Unique features**: 
+- **Account Intelligence** - Smart categorization, health monitoring, and nickname management across AWS accounts
+- **ARN Intelligence** - Human-readable ARN display with smart truncation and explanation capabilities
 - **Network security auditing** - Detect SSH/RDP open to world, overly permissive security groups
 - **Service-level credit usage analysis** - See exactly which AWS services consume promotional credits
 - **Multi-account security posture** - Unified security scoring across AWS organizations
@@ -26,6 +29,9 @@ pip install aws-super-cli
 ## Quick Start
 
 ```bash
+# Smart account management
+aws-super-cli accounts                    # List accounts with categorization & health
+
 # Run comprehensive security audit
 aws-super-cli audit --summary
 
@@ -35,8 +41,106 @@ aws-super-cli ls ec2 --all-accounts
 # Get cost summary with credit analysis
 aws-super-cli cost summary
 
-# List available AWS profiles
-aws-super-cli accounts
+# Explain ARNs in human-readable format
+aws-super-cli explain arn:aws:iam::123456789012:user/john-doe
+```
+
+## Multi-Account Intelligence
+
+AWS Super CLI provides intelligent multi-account management with automatic categorization and health monitoring:
+
+### Account Management Commands
+
+```bash
+aws-super-cli accounts                     # Smart account listing with health checks
+aws-super-cli accounts --category production  # Filter by environment type
+aws-super-cli accounts-dashboard           # Comprehensive account overview
+aws-super-cli accounts-health              # Detailed health reporting
+aws-super-cli accounts-nickname myprofile "Production Environment"  # Set nicknames
+```
+
+### Account Intelligence Features
+
+**Smart Categorization:**
+- Automatic environment detection (production, staging, development, security, etc.)
+- Pattern-based recognition from account names and descriptions
+- Manual category override capabilities
+
+**Health Monitoring:**
+- Real-time health checks across AWS services (EC2, IAM, S3)
+- Permission validation and access testing
+- Health status indicators: healthy, warning, error, unknown
+
+**Enhanced Organization:**
+- Account nicknames for better identification
+- Category-based filtering and grouping
+- Rich table display with comprehensive account information
+
+### Example Account Output
+
+```
+AWS Account Intelligence
+
+                                     AWS Accounts & Profiles                                      
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Name            ┃ Nickname     ┃ Category     ┃ Account ID     ┃ Health   ┃ Type     ┃ Description             ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ prod-account    │ Production   │ production   │ 123456789012   │ ✓ healthy│ SSO      │ Main production account │
+│ staging         │ —            │ staging      │ 123456789013   │ ✓ healthy│ SSO      │ Staging environment     │
+│ dev-team        │ —            │ development  │ 123456789014   │ ⚠ warning│ Profile  │ Development account     │
+└─────────────────┴──────────────┴──────────────┴────────────────┴──────────┴──────────┴─────────────────────────┘
+
+Account Summary
+Total Accounts: 3
+Healthy Accounts: 2 / 3
+
+Categories:
+  production: 1 accounts
+  staging: 1 accounts  
+  development: 1 accounts
+```
+
+## ARN Intelligence
+
+AWS Super CLI provides intelligent ARN handling to make long AWS resource names manageable:
+
+### ARN Intelligence Commands
+
+```bash
+aws-super-cli explain arn:aws:iam::123456789012:user/john-doe  # Explain ARN components
+aws-super-cli ls iam                                          # Smart ARN display (default)
+aws-super-cli ls iam --show-full-arns                        # Show complete ARNs
+```
+
+### ARN Intelligence Features
+
+**Smart Display:**
+- Human-readable names by default (e.g., "john-doe" instead of full ARN)
+- Service-specific truncation rules (IAM: 25 chars, EC2: 20 chars, S3: 30 chars)
+- Full ARN access available with `--show-full-arns` flag
+
+**ARN Explanation:**
+- Break down ARN components with detailed descriptions
+- Service-specific pattern matching and analysis
+- Human-readable resource identification
+
+### Example ARN Output
+
+```bash
+aws-super-cli explain arn:aws:iam::123456789012:user/john-doe
+
+                                ARN Breakdown                                
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Component  ┃ Value              ┃ Description                                                     ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Partition  │ aws                │ AWS partition (standard AWS regions)                          │
+│ Service    │ iam                │ AWS Identity and Access Management                            │
+│ Region     │ (empty)            │ IAM is a global service                                       │
+│ Account    │ 123456789012       │ AWS account ID                                                │
+│ Resource   │ user/john-doe      │ IAM user named john-doe                                       │
+└────────────┴────────────────────┴─────────────────────────────────────────────────────────────┘
+
+Human-readable name: john-doe
 ```
 
 ## Security Auditing
@@ -69,7 +173,7 @@ aws-super-cli audit --services s3,iam      # S3 and IAM audit only
 - Inactive user identification (90+ days)
 - Custom policy wildcard permission detection
 
-**Network Security (NEW in v0.9.1):**
+**Network Security:**
 - Security groups with SSH/RDP open to world (0.0.0.0/0)
 - Overly permissive security group rules
 - Unused security groups identification
@@ -135,7 +239,7 @@ aws-super-cli cost credits-by-service    # Service-level credit breakdown
 ### Example Output
 
 ```
-💰 Cost Summary
+Cost Summary
 Period: Last 30 days
 Gross Cost (without credits): $665.75
 Net Cost (with credits):      $-0.05
@@ -157,39 +261,63 @@ Top Services by Credit Usage
 
 ## Supported Services
 
-| Service | Command | Multi-Account | Security Audit | Filters |
-|---------|---------|---------------|----------------|---------|
-| **Security Audit** | `aws-super-cli audit` | ✅ | ✅ | `--services`, `--summary` |
-| EC2 | `aws-super-cli ls ec2` | ✅ | ✅ | `--state`, `--instance-type`, `--tag` |
-| S3 | `aws-super-cli ls s3` | | ✅ | `--match` |
-| VPC | `aws-super-cli ls vpc` | | ✅ | `--match` |
-| RDS | `aws-super-cli ls rds` | | | `--engine` |
-| Lambda | `aws-super-cli ls lambda` | | | `--runtime` |
-| ELB | `aws-super-cli ls elb` | | | `--type` |
-| IAM | `aws-super-cli ls iam` | | ✅ | `--iam-type` |
+| Service | Command | Multi-Account | Security Audit | Account Intelligence | ARN Intelligence |
+|---------|---------|---------------|----------------|---------------------|------------------|
+| **Account Management** | `aws-super-cli accounts` | ✅ | N/A | ✅ | N/A |
+| **Security Audit** | `aws-super-cli audit` | ✅ | ✅ | N/A | N/A |
+| **ARN Explanation** | `aws-super-cli explain` | N/A | N/A | N/A | ✅ |
+| EC2 | `aws-super-cli ls ec2` | ✅ | ✅ | N/A | ✅ |
+| S3 | `aws-super-cli ls s3` | ✅ | ✅ | N/A | ✅ |
+| VPC | `aws-super-cli ls vpc` | ✅ | ✅ | N/A | ✅ |
+| RDS | `aws-super-cli ls rds` | ✅ | ✅ | N/A | ✅ |
+| Lambda | `aws-super-cli ls lambda` | ✅ | ✅ | N/A | ✅ |
+| ELB | `aws-super-cli ls elb` | ✅ | ✅ | N/A | ✅ |
+| IAM | `aws-super-cli ls iam` | ✅ | ✅ | N/A | ✅ |
 
 ## Multi-Account Support
 
-aws-super-cli automatically discovers AWS profiles and queries them in parallel:
+aws-super-cli automatically discovers AWS profiles and provides intelligent account management:
 
 ```bash
-# Security audit across all accounts
-aws-super-cli audit --all-accounts
+# Account intelligence and management
+aws-super-cli accounts                     # Smart account listing with health checks
+aws-super-cli accounts --category production  # Filter by environment type
+aws-super-cli accounts-dashboard           # Comprehensive overview
+aws-super-cli accounts-health              # Detailed health monitoring
 
-# Query all accessible accounts
-aws-super-cli ls ec2 --all-accounts
-
-# Query specific accounts
-aws-super-cli ls s3 --accounts "prod-account,staging-account"
-
-# Pattern matching
-aws-super-cli ls rds --accounts "prod-*"
-
-# List available profiles
-aws-super-cli accounts
+# Multi-account operations  
+aws-super-cli audit --all-accounts         # Security audit across all accounts
+aws-super-cli ls ec2 --all-accounts        # Query all accessible accounts
+aws-super-cli ls s3 --accounts "prod-account,staging-account"  # Query specific accounts
+aws-super-cli ls rds --accounts "prod-*"   # Pattern matching
 ```
 
 ## Usage Examples
+
+**Account management:**
+```bash
+# Smart account organization
+aws-super-cli accounts                     # List with intelligent categorization
+aws-super-cli accounts --category production  # Focus on production accounts
+aws-super-cli accounts-nickname prod "Production Environment"  # Set friendly names
+aws-super-cli accounts-dashboard           # Comprehensive account overview
+
+# Account health monitoring
+aws-super-cli accounts-health              # Detailed health assessment
+aws-super-cli accounts --no-health-check   # Fast listing without health checks
+```
+
+**ARN intelligence:**
+```bash
+# Human-readable ARN display
+aws-super-cli ls iam                       # Smart ARN truncation (default)
+aws-super-cli ls iam --show-full-arns      # Full ARNs when needed
+aws-super-cli explain arn:aws:iam::123456789012:user/john-doe  # ARN breakdown
+
+# Service-specific ARN handling
+aws-super-cli ls ec2                       # EC2 instance names (20 char limit)
+aws-super-cli ls s3                        # S3 bucket names (30 char limit)
+```
 
 **Security auditing:**
 ```bash
@@ -238,6 +366,8 @@ aws-super-cli cost by-account
 
 | Feature | AWS CLI v2 | AWS Super CLI | Other Tools |
 |---------|------------|------|-------------|
+| Account intelligence | None | Smart categorization & health | None |
+| ARN intelligence | None | Human-readable display | None |
 | Security auditing | None | Comprehensive | Basic/None |
 | Network security analysis | None | Advanced | Limited |
 | Multi-account queries | Manual switching | Automatic parallel | Varies |
@@ -246,7 +376,7 @@ aws-super-cli cost by-account
 | Credit tracking | None | Service-level | None |
 | Setup complexity | Medium | Zero config | High |
 
-**AWS Super CLI is the only tool that provides comprehensive security auditing with service-level credit usage analysis.**
+**AWS Super CLI is the only tool that provides comprehensive account intelligence, ARN intelligence, and security auditing with service-level credit usage analysis.**
 
 ## Technical Details
 

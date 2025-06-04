@@ -781,9 +781,9 @@ async def get_credit_usage_by_service(days: int = 30, debug: bool = False) -> Li
         return []
 
 
-def create_credit_analysis_table(credit_data: Dict[str, Any]) -> Table:
-    """Create a rich table for credit analysis"""
-    table = Table(title="💳 AWS Credits Analysis", show_header=True, header_style="bold magenta")
+def create_credit_analysis_table(analysis_data: Dict) -> Table:
+    """Create a beautiful table for credit analysis"""
+    table = Table(title="AWS Credits Analysis", show_header=True, header_style="bold magenta")
     
     table.add_column("Metric", style="cyan", min_width=25)
     table.add_column("Value", style="green", min_width=20)
@@ -791,38 +791,38 @@ def create_credit_analysis_table(credit_data: Dict[str, Any]) -> Table:
     
     table.add_row(
         "Analysis Period",
-        credit_data.get('analysis_period', 'N/A'),
+        analysis_data.get('analysis_period', 'N/A'),
         "Historical credit usage data"
     )
     
     table.add_row(
         "Total Credits (3 months)",
-        format_cost_amount(str(credit_data.get('total_credits_analyzed', 0))),
+        format_cost_amount(str(analysis_data.get('total_credits_analyzed', 0))),
         "Credits consumed in analysis period"
     )
     
     table.add_row(
         "Average Monthly Usage",
-        format_cost_amount(str(credit_data.get('avg_monthly_usage', 0))),
+        format_cost_amount(str(analysis_data.get('avg_monthly_usage', 0))),
         "Based on complete months only"
     )
     
     table.add_row(
         "Current Month Usage",
-        format_cost_amount(str(credit_data.get('current_month_usage', 0))),
+        format_cost_amount(str(analysis_data.get('current_month_usage', 0))),
         "Month-to-date credit consumption"
     )
     
     table.add_row(
         "Projected Month Total",
-        format_cost_amount(str(credit_data.get('projected_month_usage', 0))),
+        format_cost_amount(str(analysis_data.get('projected_month_usage', 0))),
         "Estimated total for current month"
     )
     
     table.add_row(
         "Credit Runway",
         "Check AWS Console",
-        credit_data.get('runway_estimate', 'AWS API limitation')
+        analysis_data.get('runway_estimate', 'AWS API limitation')
     )
     
     return table
