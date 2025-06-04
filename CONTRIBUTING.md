@@ -77,8 +77,82 @@ Common scopes for this project:
 - `cli`: Command-line interface changes
 - `aws`: AWS integration and authentication
 - `multi-account`: Multi-account functionality
+- `audit`: Security audit features
 - `docs`: Documentation
 - `test`: Testing
+
+## README.md Update Guidelines
+
+The README.md must be updated when implementing features that change the user experience. **Always include README.md updates in the same commit as the feature implementation.**
+
+### When to Update README.md
+
+**REQUIRED Updates:**
+- New commands or CLI options
+- New service support
+- Changes to existing command behavior
+- New security audit features
+- Installation requirement changes
+- New configuration options
+
+**Optional Updates:**
+- Internal refactoring (no user-visible changes)
+- Test improvements
+- Documentation fixes
+
+### What to Update in README.md
+
+1. **Quick Start section** - Add new commands to basic examples
+2. **Supported Services table** - Add new services with their commands and filters
+3. **Usage Examples** - Include realistic examples of new features
+4. **Command reference** - Document new flags and options
+5. **Feature descriptions** - Explain what the new functionality does
+
+### README.md Update Process
+
+1. **During feature development**: Update README.md as you build
+2. **Test examples**: Ensure all README.md examples actually work
+3. **Single commit**: Include README.md changes in the same commit as the feature
+4. **Commit message**: Use `feat(scope): description` (not separate `docs:` commit)
+
+### Example: Adding Security Audit Features
+
+**Bad approach:**
+```bash
+# Separate commits
+git commit -m "feat(audit): add security audit command"
+git commit -m "docs: update README with audit examples"
+```
+
+**Good approach:**
+```bash
+# Single commit with README updates included
+git commit -m "feat(audit): add comprehensive security audit command
+
+- Implement S3 bucket security scanning
+- Add IAM user privilege analysis  
+- Include security scoring system (0-100)
+- Add --summary flag for quick overview
+- Update README.md with audit examples and documentation"
+```
+
+### README.md Sections to Maintain
+
+Keep these sections current:
+- **Quick Start**: Basic commands that work immediately
+- **Supported Services**: Accurate table with current services
+- **Usage Examples**: Real-world scenarios that demonstrate value
+- **Multi-Account Support**: Current account selection options
+- **Cost Analysis**: Current cost command functionality
+- **Security Audit**: Current audit capabilities (when implemented)
+
+### Quality Standards
+
+- **Test all examples**: Every command in README.md must work
+- **Keep it current**: Remove outdated information
+- **Be specific**: Use real service names, not placeholders
+- **Show value**: Examples should demonstrate actual use cases
+- **Professional tone**: Match the enterprise-grade standard
 
 ### Pull Request Guidelines
 
@@ -86,6 +160,7 @@ Common scopes for this project:
 - Use meaningful branch names (`feat/rds-filtering`, `fix/cost-api-dates`)
 - Include tests for new features
 - Update documentation as needed
+- **Include README.md updates for user-facing changes**
 
 ### Why These Standards?
 
@@ -95,6 +170,12 @@ Professional commit messages:
 - Improve code review efficiency
 - Demonstrate technical maturity to potential contributors
 - Build trust with developers evaluating the tool
+
+Updated README.md ensures:
+- Users can immediately use new features
+- Documentation matches actual functionality
+- Examples work out of the box
+- Professional presentation for enterprise evaluation
 
 ### Enforcement
 

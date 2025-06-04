@@ -1,7 +1,7 @@
 """AWS Super CLI - Main CLI interface"""
 
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import typer
 from rich.console import Console
 from rich import print as rprint
@@ -12,284 +12,296 @@ from .services import cost as cost_analysis
 from .services import audit as audit_service
 from .aws import aws_session
 
-app = typer.Typer(help="AWS Super CLI – one-command resource visibility")
+app = typer.Typer(
+    name="aws-super-cli",
+    help="""
+AWS Super CLI – Your AWS resource discovery and security tool
+
+Quick examples:
+  aws-super-cli ls ec2                    # List EC2 instances
+  aws-super-cli audit                     # Run security audit  
+  aws-super-cli help                      # Show detailed examples
+  aws-super-cli accounts                  # List available accounts
+
+Common use cases:
+  • Resource discovery across multiple accounts
+  • Security auditing and compliance checking
+  • Cost analysis and optimization
+  • Quick AWS environment overview
+    """,
+    epilog="Need help? Run 'aws-super-cli help' for detailed examples and usage patterns.",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    no_args_is_help=True,
+)
 console = Console()
 
-@app.command()
-def ls(
-    service: str = typer.Argument(..., help="Service to list (ec2, s3, vpc, rds, lambda, elb, iam)"),
-    region: Optional[str] = typer.Option(None, "--region", "-r", help="Specific region to query"),
+@app.command(name="ls", help="List AWS resources across regions with beautiful output")
+def list_resources(
+    service: Optional[str] = typer.Argument(None, help="Service to list (ec2, s3, vpc, rds, lambda, elb, iam)"),
+    region: Optional[str] = typer.Option(None, "-r", "--region", help="Specific region to query"),
     all_regions: bool = typer.Option(True, "--all-regions/--no-all-regions", help="Query all regions (default) or current region only"),
     all_accounts: bool = typer.Option(False, "--all-accounts", help="Query all accessible AWS accounts"),
     accounts: Optional[str] = typer.Option(None, "--accounts", help="Comma-separated profiles or pattern (e.g., 'prod-*,staging')"),
-    match: Optional[str] = typer.Option(None, "--match", "-m", help="Filter resources by name/tags (fuzzy match)"),
-    columns: Optional[str] = typer.Option(None, "--columns", "-c", help="Comma-separated list of columns to display"),
+    match: Optional[str] = typer.Option(None, "-m", "--match", help="Filter resources by name/tags (fuzzy match)"),
+    columns: Optional[str] = typer.Option(None, "-c", "--columns", help="Comma-separated list of columns to display"),
+    # EC2 specific filters
     state: Optional[str] = typer.Option(None, "--state", help="Filter EC2 instances by state (running, stopped, etc.)"),
     instance_type: Optional[str] = typer.Option(None, "--instance-type", help="Filter EC2 instances by instance type"),
     tag: Optional[str] = typer.Option(None, "--tag", help="Filter resources by tag (format: key=value)"),
+    # RDS specific filters
     engine: Optional[str] = typer.Option(None, "--engine", help="Filter RDS instances by engine (mysql, postgres, etc.)"),
+    # Lambda specific filters
     runtime: Optional[str] = typer.Option(None, "--runtime", help="Filter Lambda functions by runtime (python, node, etc.)"),
-    lb_type: Optional[str] = typer.Option(None, "--type", help="Filter load balancers by type (classic, application, network)"),
+    # ELB specific filters
+    type_filter: Optional[str] = typer.Option(None, "--type", help="Filter load balancers by type (classic, application, network)"),
+    # IAM specific filters
     iam_type: Optional[str] = typer.Option(None, "--iam-type", help="Filter IAM resources by type (users, roles, all)"),
 ):
-    """List AWS resources across regions with beautiful output"""
+    """List AWS resources with beautiful output"""
+    
+    # Handle missing service argument gracefully
+    if service is None:
+        rprint("[yellow]Which AWS service would you like to list?[/yellow]")
+        rprint()
+        rprint("[bold]Available services:[/bold]")
+        rprint("  [green]aws-super-cli ls ec2[/green]                    # List EC2 instances")
+        rprint("  [green]aws-super-cli ls s3[/green]                     # List S3 buckets")
+        rprint("  [green]aws-super-cli ls vpc[/green]                    # List VPCs")
+        rprint("  [green]aws-super-cli ls rds[/green]                    # List RDS databases")
+        rprint("  [green]aws-super-cli ls lambda[/green]                 # List Lambda functions")
+        rprint("  [green]aws-super-cli ls elb[/green]                    # List load balancers")
+        rprint("  [green]aws-super-cli ls iam[/green]                    # List IAM resources")
+        rprint()
+        rprint("[bold]Quick examples:[/bold]")
+        rprint("  [cyan]aws-super-cli ls ec2 --all-accounts[/cyan]       # EC2 across all accounts")
+        rprint("  [cyan]aws-super-cli ls rds --engine postgres[/cyan]    # Find PostgreSQL databases")
+        rprint("  [cyan]aws-super-cli help[/cyan]                        # Show more examples")
+        return
+    
+    # Define supported services and aliases
+    SUPPORTED_SERVICES = ['ec2', 's3', 'vpc', 'rds', 'lambda', 'elb', 'iam']
+    SERVICE_ALIASES = {
+        'instances': 'ec2',
+        'instance': 'ec2',
+        'servers': 'ec2',
+        'vms': 'ec2',
+        'buckets': 's3',
+        'bucket': 's3',
+        'storage': 's3',
+        'databases': 'rds',
+        'database': 'rds',
+        'db': 'rds',
+        'functions': 'lambda',
+        'function': 'lambda',
+        'lambdas': 'lambda',
+        'loadbalancers': 'elb',
+        'loadbalancer': 'elb',
+        'load-balancers': 'elb',
+        'load-balancer': 'elb',
+        'lb': 'elb',
+        'alb': 'elb',
+        'nlb': 'elb',
+        'users': 'iam',
+        'roles': 'iam',
+        'policies': 'iam',
+        'identity': 'iam'
+    }
+    
+    # Normalize service name
     service_lower = service.lower()
     
-    # Determine which profiles/accounts to query
-    profiles_to_query = []
+    # Check if it's an alias first
+    if service_lower in SERVICE_ALIASES:
+        service = SERVICE_ALIASES[service_lower]
+        rprint(f"[dim]Interpreting '{service_lower}' as '{service}'[/dim]")
     
-    if all_accounts:
-        # Query all accessible accounts
-        try:
-            accounts_info = asyncio.run(aws_session.multi_account.discover_accounts())
-            profiles_to_query = [acc['profile'] for acc in accounts_info]
-            
-            if not profiles_to_query:
-                console.print("[yellow]No accessible AWS accounts found.[/yellow]")
-                console.print("\n[dim]Run 'aws-super-cli accounts' to see available profiles[/dim]")
-                return
-                
-            console.print(f"[dim]Querying {len(profiles_to_query)} accounts: {', '.join(profiles_to_query)}[/dim]")
-            
-        except Exception as e:
-            console.print(f"[red]Error discovering accounts: {e}[/red]")
-            return
-    elif accounts:
-        # Query specific accounts or patterns
-        if ',' in accounts:
-            # Multiple accounts specified
-            account_patterns = [p.strip() for p in accounts.split(',')]
-        else:
-            # Single account or pattern
-            account_patterns = [accounts.strip()]
+    # Check if service is supported
+    if service not in SUPPORTED_SERVICES:
+        # Find fuzzy matches and deduplicate
+        from difflib import get_close_matches
+        suggestions = get_close_matches(service_lower, SUPPORTED_SERVICES + list(SERVICE_ALIASES.keys()), n=5, cutoff=0.3)
         
-        # Expand patterns
-        for pattern in account_patterns:
-            if '*' in pattern:
-                # Pattern matching
-                matched = aws_session.multi_account.get_profiles_by_pattern(pattern.replace('*', ''))
-                profiles_to_query.extend(matched)
-            else:
-                # Exact profile name
-                profiles_to_query.append(pattern)
+        # Deduplicate suggestions by converting aliases to actual services
+        unique_suggestions = []
+        seen_services = set()
+        for suggestion in suggestions:
+            actual_service = SERVICE_ALIASES.get(suggestion, suggestion)
+            if actual_service not in seen_services:
+                unique_suggestions.append(actual_service)
+                seen_services.add(actual_service)
         
-        if not profiles_to_query:
-            console.print(f"[yellow]No profiles found matching: {accounts}[/yellow]")
-            console.print("\n[dim]Run 'aws-super-cli accounts' to see available profiles[/dim]")
-            return
-            
-        console.print(f"[dim]Querying accounts: {', '.join(profiles_to_query)}[/dim]")
-    else:
-        # Single account (current profile)
-        profiles_to_query = None  # Will use current profile by default
+        rprint(f"[red]Unknown service: '{service}'[/red]")
+        rprint()
+        
+        if unique_suggestions:
+            rprint("[yellow]Did you mean:[/yellow]")
+            for suggestion in unique_suggestions[:3]:  # Show max 3 suggestions
+                rprint(f"  [cyan]aws-super-cli ls {suggestion}[/cyan]")
+            rprint()
+        
+        rprint("[bold]Supported services:[/bold]")
+        for svc in SUPPORTED_SERVICES:
+            rprint(f"  [green]aws-super-cli ls {svc}[/green]")
+        
+        rprint()
+        rprint("[bold]Quick examples:[/bold]")
+        rprint("  [cyan]aws-super-cli ls ec2[/cyan]                    # List EC2 instances")
+        rprint("  [cyan]aws-super-cli ls s3[/cyan]                     # List S3 buckets")  
+        rprint("  [cyan]aws-super-cli ls rds --engine postgres[/cyan]  # Find PostgreSQL databases")
+        rprint("  [cyan]aws-super-cli help[/cyan]                      # Show more examples")
+        return
     
-    # Determine regions to query
-    if region:
-        regions_to_query = [region]
-    elif all_regions:
-        regions_to_query = aws_session.get_available_regions(service_lower)
-    else:
-        # Current region only
-        try:
-            import boto3
-            session = boto3.Session()
-            current_region = session.region_name or 'us-east-1'
-            regions_to_query = [current_region]
-        except:
-            regions_to_query = ['us-east-1']
+    # Multi-account support check
+    multi_account_services = ['ec2']  # Services that support multi-account
     
+    if all_accounts and service not in multi_account_services:
+        rprint(f"[yellow]Multi-account support for {service} coming soon![/yellow]")
+        rprint(f"[dim]Running single-account query for {service}...[/dim]")
+        rprint()
+        all_accounts = False
+    elif accounts and service not in multi_account_services:
+        rprint(f"[yellow]Multi-account support for {service} coming soon![/yellow]")
+        rprint(f"[dim]Running single-account query for {service}...[/dim]")
+        rprint()
+        accounts = None
+    
+    # Rest of the existing function logic...
     try:
-        # Call the appropriate service
-        if service_lower == "ec2":
-            if profiles_to_query:
-                # Multi-account call
-                async def run_multi_account():
-                    return await aws_session.multi_account.call_service_multi_account(
-                        'ec2', 'describe_instances',
-                        profiles=profiles_to_query,
-                        regions=regions_to_query
-                    )
-                
-                responses = asyncio.run(run_multi_account())
-                instances = ec2.format_ec2_data_multi_account(responses)
-            else:
-                # Single account call
-                instances = asyncio.run(ec2.list_ec2_instances(
-                    regions=regions_to_query,
+        if service == "ec2":
+            from awsx.services.ec2 import list_ec2_instances, list_ec2_instances_multi_account
+            if all_accounts or accounts:
+                asyncio.run(list_ec2_instances_multi_account(
+                    all_accounts=all_accounts, 
+                    account_patterns=accounts.split(',') if accounts else None,
+                    regions=region.split(',') if region else None,
                     all_regions=all_regions,
                     match=match,
-                    state=state
+                    state=state,
+                    instance_type=instance_type,
+                    tag=tag,
+                    columns=columns.split(',') if columns else None
                 ))
-                
-            # Apply filters
-            if match or state or instance_type or tag:
-                instances = ec2.apply_ec2_filters(instances, match, state, instance_type, tag)
-            
-            if not instances:
-                console.print("[yellow]No EC2 instances found with the specified criteria.[/yellow]")
-                return
-            
-            # Handle columns
-            column_list = None
-            if columns:
-                column_list = [col.strip() for col in columns.split(',')]
-            
-            table = ec2.create_ec2_table(instances, column_list)
-            console.print(table)
-            
-            # Show summary with account info if multi-account
-            if profiles_to_query:
-                account_count = len(set(instance.get('Account', 'Unknown') for instance in instances))
-                region_count = len(set(instance['Region'] for instance in instances))
-                console.print(f"\n[green]Found {len(instances)} EC2 instances across {account_count} accounts and {region_count} regions[/green]")
             else:
-                console.print(f"\n[green]Found {len(instances)} EC2 instances[/green]")
-            
-        elif service_lower == "s3":
-            buckets = asyncio.run(s3.list_s3_buckets(
-                regions=[region] if region else None,
+                asyncio.run(list_ec2_instances(
+                    regions=region.split(',') if region else None,
+                    all_regions=all_regions,
+                    match=match,
+                    state=state,
+                    instance_type=instance_type,
+                    tag=tag,
+                    columns=columns.split(',') if columns else None
+                ))
+        elif service == "s3":
+            from awsx.services.s3 import list_s3_buckets
+            asyncio.run(list_s3_buckets(match=match))
+        elif service == "vpc":
+            from awsx.services.vpc import list_vpcs
+            asyncio.run(list_vpcs(
+                regions=region.split(',') if region else None,
                 all_regions=all_regions,
                 match=match
             ))
-            
-            if not buckets:
-                console.print("[yellow]No S3 buckets found with the specified criteria.[/yellow]")
-                return
-            
-            column_list = None
-            if columns:
-                column_list = [col.strip() for col in columns.split(',')]
-            
-            table = s3.create_s3_table(buckets, column_list)
-            console.print(table)
-            console.print(f"\n[green]Found {len(buckets)} S3 buckets[/green]")
-            
-        elif service_lower == "vpc":
-            vpcs = asyncio.run(vpc.list_vpcs(
-                regions=[region] if region else None,
+        elif service == "rds":
+            from awsx.services.rds import list_rds_instances
+            asyncio.run(list_rds_instances(
+                regions=region.split(',') if region else None,
                 all_regions=all_regions,
+                engine=engine,
                 match=match
             ))
-            
-            if not vpcs:
-                console.print("[yellow]No VPCs found with the specified criteria.[/yellow]")
-                return
-            
-            column_list = None
-            if columns:
-                column_list = [col.strip() for col in columns.split(',')]
-            
-            table = vpc.create_vpc_table(vpcs, column_list)
-            console.print(table)
-            console.print(f"\n[green]Found {len(vpcs)} VPCs[/green]")
-
-        elif service_lower == "rds":
-            instances = asyncio.run(rds.list_rds_instances(
-                regions=[region] if region else None,
+        elif service == "lambda":
+            from awsx.services.lambda_service import list_lambda_functions
+            asyncio.run(list_lambda_functions(
+                regions=region.split(',') if region else None,
                 all_regions=all_regions,
-                match=match,
-                engine=engine
+                runtime=runtime,
+                match=match
             ))
-            
-            if not instances:
-                console.print("[yellow]No RDS instances found with the specified criteria.[/yellow]")
-                return
-            
-            column_list = None
-            if columns:
-                column_list = [col.strip() for col in columns.split(',')]
-            
-            table = rds.create_rds_table(instances, column_list)
-            console.print(table)
-            console.print(f"\n[green]Found {len(instances)} RDS instances[/green]")
-
-        elif service_lower == "lambda":
-            functions = asyncio.run(lambda_.list_lambda_functions(
-                regions=[region] if region else None,
+        elif service == "elb":
+            from awsx.services.elb import list_load_balancers
+            asyncio.run(list_load_balancers(
+                regions=region.split(',') if region else None,
                 all_regions=all_regions,
-                match=match,
-                runtime=runtime
+                lb_type=type_filter,
+                match=match
             ))
-            
-            if not functions:
-                console.print("[yellow]No Lambda functions found with the specified criteria.[/yellow]")
-                return
-            
-            column_list = None
-            if columns:
-                column_list = [col.strip() for col in columns.split(',')]
-            
-            table = lambda_.create_lambda_table(functions, column_list)
-            console.print(table)
-            console.print(f"\n[green]Found {len(functions)} Lambda functions[/green]")
-            
-        elif service_lower == "elb":
-            load_balancers = asyncio.run(elb.list_load_balancers(
-                regions=[region] if region else None,
-                all_regions=all_regions,
-                match=match,
-                lb_type=lb_type
+        elif service == "iam":
+            from awsx.services.iam import list_iam_resources
+            asyncio.run(list_iam_resources(
+                iam_type=iam_type,
+                match=match
             ))
-            
-            if not load_balancers:
-                console.print("[yellow]No load balancers found with the specified criteria.[/yellow]")
-                return
-            
-            column_list = None
-            if columns:
-                column_list = [col.strip() for col in columns.split(',')]
-            
-            table = elb.create_elb_table(load_balancers, column_list)
-            console.print(table)
-            console.print(f"\n[green]Found {len(load_balancers)} load balancers[/green]")
-            
-        elif service_lower == "iam":
-            resources = asyncio.run(iam.list_iam_resources(
-                match=match,
-                resource_type=iam_type or 'all'
-            ))
-            
-            if not resources:
-                console.print("[yellow]No IAM resources found with the specified criteria.[/yellow]")
-                return
-            
-            column_list = None
-            if columns:
-                column_list = [col.strip() for col in columns.split(',')]
-            
-            table = iam.create_iam_table(resources, column_list)
-            console.print(table)
-            console.print(f"\n[green]Found {len(resources)} IAM resources[/green]")
-            
         else:
-            console.print(f"[red]Multi-account support for {service} coming soon![/red]")
-            console.print("[cyan]Multi-account support currently available for: ec2[/cyan]")
-            console.print("[yellow]Single-account support available for: s3, vpc, rds, lambda, elb, iam[/yellow]")
-            console.print("\n[bold]Examples:[/bold]")
-            console.print("  aws-super-cli ls ec2 --all-accounts        # Multi-account EC2 (works now!)")
-            console.print("  aws-super-cli ls s3                        # Single-account S3")
-            console.print("  aws-super-cli ls rds --engine postgres     # Single-account RDS")
-            console.print("  aws-super-cli accounts                     # List available profiles")
-            return
-
+            # This shouldn't happen now due to validation above, but keep as fallback
+            rprint(f"Multi-account support for {service} coming soon!")
+            rprint(f"Multi-account support currently available for: {', '.join(multi_account_services)}")
+            rprint(f"Single-account support available for: {', '.join([s for s in SUPPORTED_SERVICES if s not in multi_account_services])}")
+            rprint()
+            rprint("Examples:")
+            rprint("  aws-super-cli ls ec2 --all-accounts        # Multi-account EC2 (works now!)")
+            rprint("  aws-super-cli ls s3                        # Single-account S3")
+            rprint("  aws-super-cli ls rds --engine postgres     # Single-account RDS")
+            rprint("  aws-super-cli accounts                     # List available profiles")
+    
     except Exception as e:
-        console.print(f"[red]Error listing resources: {e}[/red]")
-        help_messages = aws_session.get_credential_help(e)
-        if help_messages:
-            console.print("")
-            for message in help_messages:
-                console.print(message)
-        raise typer.Exit(1)
+        with console.status("[bold red]Error occurred...", spinner="dots"):
+            pass
+        
+        console.print(f"[bold red]❌ Error: {e}[/bold red]")
+        
+        # Provide helpful suggestions based on the error
+        error_str = str(e).lower()
+        if "credentials" in error_str or "access denied" in error_str:
+            console.print()
+            console.print("[yellow]Credential issues detected. Try:[/yellow]")
+            console.print("  [cyan]aws-super-cli version[/cyan]           # Check credential status")
+            console.print("  [cyan]aws configure[/cyan]                  # Configure credentials")
+            console.print("  [cyan]aws sts get-caller-identity[/cyan]    # Test AWS access")
+        elif "region" in error_str:
+            console.print()
+            console.print("[yellow]Region issues detected. Try:[/yellow]")
+            console.print(f"  [cyan]aws-super-cli ls {service} --region us-east-1[/cyan]  # Specify region")
+            console.print("  [cyan]aws configure set region us-east-1[/cyan]           # Set default region")
+        
+        # Always show debug info for now since we're in development
+        console.print()
+        console.print("[bold red]Debug info:[/bold red]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
 
 @app.command()
 def cost(
-    command: str = typer.Argument(..., help="Cost command (top-spend, with-credits, by-account, daily, summary, month, credits, credits-by-service)"),
+    command: Optional[str] = typer.Argument(None, help="Cost command (top-spend, with-credits, by-account, daily, summary, month, credits, credits-by-service)"),
     days: int = typer.Option(30, "--days", "-d", help="Number of days to analyze (default: 30)"),
     limit: int = typer.Option(10, "--limit", "-l", help="Number of results to show (default: 10)"),
     debug: bool = typer.Option(False, "--debug", help="Show debug information including raw API responses"),
 ):
     """Analyze AWS costs and spending patterns"""
+    
+    # If no command provided, show summary by default
+    if command is None:
+        rprint("[yellow]Which cost analysis would you like?[/yellow]")
+        rprint()
+        rprint("[bold]Most Popular:[/bold]")
+        rprint("  [cyan]aws-super-cli cost summary[/cyan]              # Overall cost overview")
+        rprint("  [cyan]aws-super-cli cost top-spend[/cyan]            # Biggest spending services")
+        rprint("  [cyan]aws-super-cli cost credits[/cyan]              # Credit usage analysis")
+        rprint()
+        rprint("[bold]All Available Commands:[/bold]")
+        rprint("  [green]summary[/green]              # Comprehensive cost summary")
+        rprint("  [green]top-spend[/green]            # Top spending services (gross costs)")
+        rprint("  [green]with-credits[/green]         # Top spending services (net costs)")
+        rprint("  [green]by-account[/green]           # Costs broken down by account")
+        rprint("  [green]daily[/green]                # Daily cost trends")
+        rprint("  [green]month[/green]                # Current month costs")
+        rprint("  [green]credits[/green]              # Credit usage trends")
+        rprint("  [green]credits-by-service[/green]   # Credit usage by service")
+        rprint()
+        rprint("[bold]Quick start:[/bold]")
+        rprint("  [cyan]aws-super-cli cost summary[/cyan]              # Start here!")
+        return
+    
     command_lower = command.lower()
     
     try:
@@ -315,7 +327,7 @@ def cost(
             console.print(f"\n[green]Total gross cost shown: {cost_analysis.format_cost_amount(str(total_shown))}[/green]")
             
             # Also show with credits applied for comparison
-            console.print(f"\n[dim]💡 Use '--include-credits' flag to see costs with credits applied[/dim]")
+            console.print(f"\n[dim]Use '--include-credits' flag to see costs with credits applied[/dim]")
             
         elif command_lower == "with-credits":
             console.print(f"[cyan]Analyzing top spending services (WITH credits applied) for the last {days} days...[/cyan]")
@@ -387,7 +399,7 @@ def cost(
             
             summary = asyncio.run(cost_analysis.get_cost_summary(days=days, debug=debug))
             
-            console.print("\n[bold]💰 Cost Summary[/bold]")
+            console.print("\n[bold]Cost Summary[/bold]")
             console.print(f"Period: {summary['period']}")
             console.print(f"Gross Cost (without credits): [green]{summary['gross_cost']}[/green]")
             console.print(f"Net Cost (with credits):      [blue]{summary['net_cost']}[/blue]")
@@ -408,7 +420,7 @@ def cost(
             console.print(f"Credits Applied:              [yellow]{month_data['credits_applied']}[/yellow]")
             
         elif command_lower == "credits":
-            console.print("[cyan]🔍 Analyzing AWS credits usage patterns...[/cyan]")
+            console.print("[cyan]Analyzing AWS credits usage patterns...[/cyan]")
             
             credit_analysis = asyncio.run(cost_analysis.get_credit_analysis(days=90, debug=debug))
             
@@ -429,13 +441,13 @@ def cost(
                 console.print(f"  {month_data['month']}: [yellow]{credits}[/yellow] credits applied (gross: [dim]{gross}[/dim])")
             
             # Important note about remaining balance
-            console.print(f"\n[bold yellow]⚠️  Important:[/bold yellow]")
+            console.print(f"\n[bold yellow]Important:[/bold yellow]")
             console.print(f"[dim]{credit_analysis['note']}[/dim]")
-            console.print(f"[cyan]💡 To see remaining credit balance, visit:[/cyan]")
+            console.print(f"[cyan]To see remaining credit balance, visit:[/cyan]")
             console.print(f"   [link]https://console.aws.amazon.com/billing/home#/credits[/link]")
             
         elif command_lower == "credits-by-service":
-            console.print(f"[cyan]🔍 Analyzing credit usage by service (last {days} days)...[/cyan]")
+            console.print(f"[cyan]Analyzing credit usage by service (last {days} days)...[/cyan]")
             
             credit_usage = asyncio.run(cost_analysis.get_credit_usage_by_service(days=days, debug=debug))
             
@@ -518,9 +530,9 @@ def version():
             session = boto3.Session()
             region = session.region_name or 'us-east-1'
             
-            rprint(f"✅ Credentials working: {credential_source}")
-            rprint(f"✅ Account ID: {account_id}")
-            rprint(f"✅ Default region: {region}")
+            rprint(f"Credentials working: {credential_source}")
+            rprint(f"Account ID: {account_id}")
+            rprint(f"Default region: {region}")
             
             # Test basic AWS access
             try:
@@ -532,12 +544,17 @@ def version():
                 instance_count = sum(len(reservation['Instances']) for reservation in response['Reservations'])
                 
                 if instance_count > 0:
-                    rprint(f"✅ EC2 API access working - found {instance_count} instances in {region or 'us-east-1'}")
+                    rprint(f"EC2 API access working - found {instance_count} instances in {region or 'us-east-1'}")
                 else:
-                    rprint(f"✅ EC2 API access working - no instances in {region or 'us-east-1'}")
+                    rprint(f"EC2 API access working - no instances in {region or 'us-east-1'}")
                     
             except Exception as e:
-                rprint(f"[yellow]⚠️ API access test failed: {e}[/yellow]")
+                rprint(f"EC2 API error: {e}")
+                help_messages = aws_session.get_credential_help(e)
+                if help_messages:
+                    rprint("")
+                    for message in help_messages:
+                        rprint(message)
                 
         else:
             rprint(f"[red]❌ No valid AWS credentials found[/red]")
@@ -565,14 +582,14 @@ def test():
         
         if has_creds and account_id:
             credential_source = aws_session.detect_credential_source()
-            rprint(f"✅ Credentials working: {credential_source}")
-            rprint(f"✅ Account ID: {account_id}")
+            rprint(f"Credentials working: {credential_source}")
+            rprint(f"Account ID: {account_id}")
             
             # Test region detection
             import boto3
             session = boto3.Session()
             region = session.region_name or 'us-east-1'
-            rprint(f"✅ Default region: {region}")
+            rprint(f"Default region: {region}")
             
             # Test EC2 permissions
             rprint("\nTesting EC2 permissions...")
@@ -590,39 +607,34 @@ def test():
                         for response in responses.values() 
                         for reservation in response.get('Reservations', [])
                     )
-                    rprint(f"✅ EC2 API access working - found {instance_count} instances in {region}")
+                    rprint(f"EC2 API access working - found {instance_count} instances in {region}")
                 else:
-                    rprint(f"✅ EC2 API access working - no instances in {region}")
+                    rprint(f"EC2 API access working - no instances in {region}")
                     
             except Exception as e:
-                rprint(f"❌ EC2 API error: {e}")
-                help_messages = aws_session.get_credential_help(e)
-                if help_messages:
-                    rprint("")
-                    for message in help_messages:
-                        rprint(message)
+                rprint(f"[yellow]API access test failed: {e}[/yellow]")
             
         elif has_creds and error:
-            rprint(f"❌ Credentials found but invalid: {error}")
+            rprint(f"Credentials found but invalid: {error}")
             help_messages = aws_session.get_credential_help(error)
             if help_messages:
                 rprint("")
                 for message in help_messages:
                     rprint(message)
         else:
-            rprint("❌ No AWS credentials found")
+            rprint("No AWS credentials found")
             help_messages = aws_session.get_credential_help(Exception("NoCredentialsError"))
             for message in help_messages:
                 rprint(message)
                 
     except Exception as e:
-        rprint(f"❌ Unexpected error: {e}")
+        rprint(f"Unexpected error: {e}")
 
 
 @app.command()
 def accounts():
     """List available AWS accounts and profiles"""
-    console.print("[bold cyan]🏢 Available AWS Accounts & Profiles[/bold cyan]")
+    console.print("[bold cyan]Available AWS Accounts & Profiles[/bold cyan]")
     console.print()
     
     try:
@@ -837,6 +849,41 @@ def audit(
         if "--debug" in str(e):
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
+
+
+@app.command(name="help", help="Show help information and common examples")
+def help_command():
+    """Show help information"""
+    print()
+    print("[bold]AWS Super CLI - Quick Reference[/bold]")
+    print()
+    print("[bold]Most Common Commands:[/bold]")
+    print("  [cyan]aws-super-cli ls ec2[/cyan]                    # List EC2 instances")
+    print("  [cyan]aws-super-cli ls s3[/cyan]                     # List S3 buckets") 
+    print("  [cyan]aws-super-cli audit[/cyan]                     # Run security audit")
+    print("  [cyan]aws-super-cli accounts[/cyan]                  # Show available accounts")
+    print("  [cyan]aws-super-cli cost summary[/cyan]              # Cost overview")
+    print()
+    print("[bold]Resource Discovery:[/bold]")
+    print("  [cyan]aws-super-cli ls ec2 --all-accounts[/cyan]     # EC2 across all accounts")
+    print("  [cyan]aws-super-cli ls rds --engine postgres[/cyan]  # Find PostgreSQL databases")
+    print("  [cyan]aws-super-cli ls lambda --runtime python[/cyan] # Find Python functions")
+    print()
+    print("[bold]Security Auditing:[/bold]")
+    print("  [cyan]aws-super-cli audit --summary[/cyan]           # Quick security overview")
+    print("  [cyan]aws-super-cli audit --all-accounts[/cyan]      # Audit all accounts")
+    print()
+    print("[bold]Cost Analysis:[/bold]")
+    print("  [cyan]aws-super-cli cost summary[/cyan]              # Overall cost trends")
+    print("  [cyan]aws-super-cli cost top-spend[/cyan]            # Biggest cost services")
+    print("  [cyan]aws-super-cli cost credits[/cyan]              # Credit usage analysis")
+    print()
+    print("[bold]For detailed help:[/bold]")
+    print("  [cyan]aws-super-cli --help[/cyan]                    # Full command reference")
+    print("  [cyan]aws-super-cli ls --help[/cyan]                 # Resource listing help")
+    print("  [cyan]aws-super-cli audit --help[/cyan]              # Security audit help")
+    print("  [cyan]aws-super-cli cost --help[/cyan]               # Cost analysis help")
+    print()
 
 
 if __name__ == "__main__":
