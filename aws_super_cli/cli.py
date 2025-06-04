@@ -853,7 +853,7 @@ def help_command():
     rprint("[bold]Security Auditing:[/bold]")
     rprint("  [cyan]aws-super-cli audit --summary[/cyan]           # Quick security overview")
     rprint("  [cyan]aws-super-cli audit --all-accounts[/cyan]      # Audit all accounts")
-    rprint("  [cyan]aws-super-cli audit --services compute[/cyan]  # Compute security only")
+    rprint("  [cyan]aws-super-cli audit --services network[/cyan]  # Network security only")
     rprint("  [cyan]aws-super-cli audit --services s3,iam[/cyan]   # S3 and IAM audit only")
     rprint()
     rprint("[bold]Cost Analysis:[/bold]")

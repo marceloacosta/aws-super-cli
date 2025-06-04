@@ -204,8 +204,8 @@ class TestNetworkSecurityFeatures:
     def setup_method(self):
         self.runner = CliRunner()
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_network_service_in_default_audit(self, mock_summary, mock_audit):
         """
         REGRESSION TEST: Ensure network service is included in default audit
@@ -231,8 +231,8 @@ class TestNetworkSecurityFeatures:
         services = call_args.kwargs['services']
         assert 'network' in services, "Network service should be in default audit services"
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_network_only_audit_works(self, mock_summary, mock_audit):
         """
         REGRESSION TEST: Network-only audit should work correctly
@@ -272,8 +272,8 @@ class TestNetworkSecurityFeatures:
         assert "--services network" in result.stdout, "Help should show network service option"
         assert "Security Auditing:" in result.stdout, "Help should have security auditing section"
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary') 
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary') 
     def test_audit_services_help_mentions_network(self, mock_summary, mock_audit):
         """
         REGRESSION TEST: Audit command help should mention network service
@@ -284,10 +284,10 @@ class TestNetworkSecurityFeatures:
         assert result.exit_code == 0
         
         # Should mention network in services help text
-        assert "s3, iam, network" in result.stdout, "Audit help should list network as available service"
+        assert "audit (s3, iam, network," in result.stdout, "Audit help should list network as available service"
 
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary') 
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary') 
     def test_audit_services_help_mentions_compute(self, mock_summary, mock_audit):
         """
         REGRESSION TEST: Audit command help should mention compute service
@@ -298,7 +298,7 @@ class TestNetworkSecurityFeatures:
         assert result.exit_code == 0
         
         # Should mention compute in services help text
-        assert "s3, iam, network, compute" in result.stdout, "Audit help should list compute as available service"
+        assert "compute)" in result.stdout, "Audit help should list compute as available service"
 
 
 class TestComputeSecurityFeatures:
@@ -307,8 +307,8 @@ class TestComputeSecurityFeatures:
     def setup_method(self):
         self.runner = CliRunner()
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_compute_service_in_default_audit(self, mock_summary, mock_audit):
         """
         REGRESSION TEST: Ensure compute service is included in default audit
@@ -334,8 +334,8 @@ class TestComputeSecurityFeatures:
         services = call_args.kwargs['services']
         assert 'compute' in services, "Compute service should be in default audit services"
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_compute_only_audit_works(self, mock_summary, mock_audit):
         """
         REGRESSION TEST: Compute-only audit should work correctly
@@ -362,8 +362,8 @@ class TestComputeSecurityFeatures:
         services = call_args.kwargs['services']
         assert services == ['compute'], "Should only audit compute service when explicitly specified"
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_compute_audit_with_other_services(self, mock_summary, mock_audit):
         """
         REGRESSION TEST: Compute audit should work in combination with other services

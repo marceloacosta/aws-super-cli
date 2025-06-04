@@ -78,15 +78,14 @@ class TestCLICommands:
         assert "Unknown service: 'invalid-service'" in result.stdout
         assert "Supported services:" in result.stdout
     
-    def test_ls_command_service_aliases(self):
+    @patch('aws_super_cli.services.ec2.list_ec2_instances')
+    def test_ls_command_service_aliases(self, mock_ec2):
         """Test that service aliases work correctly"""
-        # Test with mock to avoid actual AWS calls
-        with patch('awsx.services.ec2.list_ec2_instances') as mock_ec2:
-            mock_ec2.return_value = AsyncMock()
-            
-            result = self.runner.invoke(app, ["ls", "instances"])
-            # Should recognize 'instances' as alias for 'ec2'
-            assert "Interpreting 'instances' as 'ec2'" in result.stdout
+        mock_ec2.return_value = AsyncMock()
+        
+        result = self.runner.invoke(app, ["ls", "instances"])
+        # Should recognize 'instances' as alias for 'ec2'
+        assert "Interpreting 'instances' as 'ec2'" in result.stdout
     
     def test_cost_command_without_subcommand(self):
         """Test cost command shows helpful menu when no subcommand specified"""
@@ -150,7 +149,7 @@ class TestErrorHandling:
     def setup_method(self):
         self.runner = CliRunner()
     
-    @patch('awsx.aws.aws_session.check_credentials')
+    @patch('aws_super_cli.aws.aws_session.check_credentials')
     def test_version_command_no_credentials(self, mock_check_creds):
         """Test version command when no AWS credentials available"""
         mock_check_creds.return_value = (False, None, "No credentials found")
@@ -160,7 +159,7 @@ class TestErrorHandling:
         assert "AWS Super CLI" in result.stdout
         assert "No valid AWS credentials found" in result.stdout
     
-    @patch('awsx.aws.aws_session.check_credentials')
+    @patch('aws_super_cli.aws.aws_session.check_credentials')
     def test_test_command_no_credentials(self, mock_check_creds):
         """Test test command when no AWS credentials available"""
         mock_check_creds.return_value = (False, None, "No credentials found")
@@ -177,8 +176,8 @@ class TestServiceIntegration:
     def setup_method(self):
         self.runner = CliRunner()
     
-    @patch('awsx.cli.asyncio.run')
-    @patch('awsx.aws.aws_session.check_credentials')
+    @patch('aws_super_cli.cli.asyncio.run')
+    @patch('aws_super_cli.aws.aws_session.check_credentials')
     def test_ec2_list_success(self, mock_check_creds, mock_asyncio_run):
         """Test successful EC2 listing"""
         mock_check_creds.return_value = (True, "123456789012", None)
@@ -189,8 +188,8 @@ class TestServiceIntegration:
         # Just verify the command was processed, not the specific function call
         assert "ec2" in result.stdout or result.exit_code == 0
     
-    @patch('awsx.services.s3.list_s3_buckets')
-    @patch('awsx.aws.aws_session.check_credentials')
+    @patch('aws_super_cli.services.s3.list_s3_buckets')
+    @patch('aws_super_cli.aws.aws_session.check_credentials')
     def test_s3_list_success(self, mock_check_creds, mock_list_s3):
         """Test successful S3 listing"""
         mock_check_creds.return_value = (True, "123456789012", None)
@@ -207,7 +206,7 @@ class TestMultiAccountSupport:
     def setup_method(self):
         self.runner = CliRunner()
     
-    @patch('awsx.aws.aws_session.multi_account.discover_accounts')
+    @patch('aws_super_cli.aws.aws_session.multi_account.discover_accounts')
     def test_accounts_command_success(self, mock_discover):
         """Test accounts command with accessible accounts"""
         mock_discover.return_value = [
@@ -215,7 +214,7 @@ class TestMultiAccountSupport:
             {'profile': 'prod', 'account_id': '123456789013'}
         ]
         
-        with patch('awsx.aws.aws_session.multi_account.discover_profiles') as mock_profiles:
+        with patch('aws_super_cli.aws.aws_session.multi_account.discover_profiles') as mock_profiles:
             mock_profiles.return_value = [
                 {'name': 'default', 'type': 'standard', 'description': 'Default profile'},
                 {'name': 'prod', 'type': 'sso', 'description': 'Production profile'}
@@ -227,7 +226,7 @@ class TestMultiAccountSupport:
             assert "default" in result.stdout
             assert "prod" in result.stdout
     
-    @patch('awsx.aws.aws_session.multi_account.discover_profiles')
+    @patch('aws_super_cli.aws.aws_session.multi_account.discover_profiles')
     def test_accounts_command_no_profiles(self, mock_discover_profiles):
         """Test accounts command when no profiles found"""
         mock_discover_profiles.return_value = []
@@ -244,8 +243,8 @@ class TestAuditCommand:
     def setup_method(self):
         self.runner = CliRunner()
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_audit_command_success(self, mock_summary, mock_audit):
         """Test successful security audit"""
         mock_audit.return_value = []  # No findings
@@ -263,8 +262,8 @@ class TestAuditCommand:
         assert "Security Audit Summary" in result.stdout
         assert "95/100" in result.stdout
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_audit_command_with_findings(self, mock_summary, mock_audit):
         """Test audit with security findings"""
         mock_audit.return_value = [
@@ -285,8 +284,8 @@ class TestAuditCommand:
         assert "65/100" in result.stdout
         assert "High Risk: 1" in result.stdout
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_audit_network_services_option(self, mock_summary, mock_audit):
         """Test network security audit with services option"""
         mock_audit.return_value = []
@@ -308,8 +307,8 @@ class TestAuditCommand:
         call_args = mock_audit.call_args
         assert 'network' in call_args.kwargs['services']
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_audit_default_services_include_network(self, mock_summary, mock_audit):
         """Test that default audit includes network security"""
         mock_audit.return_value = []
@@ -333,8 +332,8 @@ class TestAuditCommand:
         assert 'iam' in services
         assert 'network' in services
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_audit_default_services_include_compute(self, mock_summary, mock_audit):
         """Test that default audit includes compute security"""
         mock_audit.return_value = []
@@ -359,8 +358,8 @@ class TestAuditCommand:
         assert 'network' in services
         assert 'compute' in services
     
-    @patch('awsx.services.audit.run_security_audit')
-    @patch('awsx.services.audit.get_security_summary')
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_audit_compute_only_audit_works(self, mock_summary, mock_audit):
         """Test that compute-only audit works correctly"""
         mock_audit.return_value = []

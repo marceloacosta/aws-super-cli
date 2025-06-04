@@ -290,7 +290,7 @@ class TestNewFeature:
     def setup_method(self):
         self.runner = CliRunner()
     
-    @patch('awsx.services.new_service.new_function')
+    @patch('aws_super_cli.services.new_service.new_function')
     def test_new_feature_success(self, mock_function):
         """Test successful new feature usage"""
         mock_function.return_value = expected_result
