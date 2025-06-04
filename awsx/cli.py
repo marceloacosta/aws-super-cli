@@ -697,7 +697,7 @@ def accounts():
 
 @app.command()
 def audit(
-    services: Optional[str] = typer.Option("s3,iam", "--services", help="Comma-separated services to audit (s3, iam)"),
+    services: Optional[str] = typer.Option("s3,iam,network", "--services", help="Comma-separated services to audit (s3, iam, network)"),
     region: Optional[str] = typer.Option(None, "--region", "-r", help="Specific region to query"),
     all_regions: bool = typer.Option(True, "--all-regions/--no-all-regions", help="Query all regions (default) or current region only"),
     all_accounts: bool = typer.Option(False, "--all-accounts", help="Query all accessible AWS accounts"),
@@ -858,6 +858,8 @@ def help_command():
     rprint("[bold]Security Auditing:[/bold]")
     rprint("  [cyan]aws-super-cli audit --summary[/cyan]           # Quick security overview")
     rprint("  [cyan]aws-super-cli audit --all-accounts[/cyan]      # Audit all accounts")
+    rprint("  [cyan]aws-super-cli audit --services network[/cyan]  # Network security only")
+    rprint("  [cyan]aws-super-cli audit --services s3,iam[/cyan]   # S3 and IAM audit only")
     rprint()
     rprint("[bold]Cost Analysis:[/bold]")
     rprint("  [cyan]aws-super-cli cost summary[/cyan]              # Overall cost trends")

@@ -639,7 +639,7 @@ async def run_security_audit(
     all_findings = []
     
     if not services:
-        services = ['s3', 'iam']  # Default services to audit
+        services = ['s3', 'iam', 'network']  # Default services to audit
     
     console = Console()
     
@@ -659,6 +659,12 @@ async def run_security_audit(
             console.print("[dim]Auditing IAM policies...[/dim]")
             iam_policy_findings = await audit_iam_policies()
             all_findings.extend(iam_policy_findings)
+        
+        # Run Network security audit if requested
+        if 'network' in services:
+            console.print("[dim]Auditing network security (VPCs, Security Groups, NACLs)...[/dim]")
+            network_findings = await audit_network_security(regions, all_regions)
+            all_findings.extend(network_findings)
     
     return all_findings
 
@@ -698,4 +704,420 @@ def get_security_summary(findings: List[SecurityFinding]) -> Dict[str, Any]:
         'low': low_count,
         'services': services,
         'score': score
-    } 
+    }
+
+
+async def audit_network_security(regions: List[str] = None, all_regions: bool = True) -> List[SecurityFinding]:
+    """Audit network security - VPCs, Security Groups, NACLs, and Subnets"""
+    findings = []
+    
+    if not regions:
+        if all_regions:
+            # Get all available regions
+            session = aioboto3.Session()
+            async with session.client('ec2', region_name='us-east-1') as ec2_client:
+                regions_response = await ec2_client.describe_regions()
+                regions = [region['RegionName'] for region in regions_response['Regions']]
+        else:
+            regions = ['us-east-1']  # Default region
+    
+    for region in regions:
+        region_findings = await _audit_network_security_region(region)
+        findings.extend(region_findings)
+    
+    return findings
+
+
+async def _audit_network_security_region(region: str) -> List[SecurityFinding]:
+    """Audit network security for a specific region"""
+    findings = []
+    
+    try:
+        session = aioboto3.Session()
+        
+        async with session.client('ec2', region_name=region) as ec2_client:
+            # Audit Security Groups
+            sg_findings = await _audit_security_groups(ec2_client, region)
+            findings.extend(sg_findings)
+            
+            # Audit Network ACLs
+            nacl_findings = await _audit_network_acls(ec2_client, region)
+            findings.extend(nacl_findings)
+            
+            # Audit VPCs
+            vpc_findings = await _audit_vpcs(ec2_client, region)
+            findings.extend(vpc_findings)
+            
+            # Audit Subnets
+            subnet_findings = await _audit_subnets(ec2_client, region)
+            findings.extend(subnet_findings)
+            
+    except Exception as e:
+        rprint(f"[red]Error auditing network security in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_security_groups(ec2_client, region: str) -> List[SecurityFinding]:
+    """Audit Security Groups for overly permissive rules"""
+    findings = []
+    
+    try:
+        # Get all security groups
+        paginator = ec2_client.get_paginator('describe_security_groups')
+        
+        async for page in paginator.paginate():
+            security_groups = page.get('SecurityGroups', [])
+            
+            for sg in security_groups:
+                sg_id = sg['GroupId']
+                sg_name = sg.get('GroupName', 'Unknown')
+                vpc_id = sg.get('VpcId', 'Classic')
+                
+                # Check inbound rules
+                for rule in sg.get('IpPermissions', []):
+                    protocol = rule.get('IpProtocol', '')
+                    from_port = rule.get('FromPort')
+                    to_port = rule.get('ToPort')
+                    
+                    # Check for SSH access from anywhere
+                    if (protocol == 'tcp' and 
+                        from_port == 22 and to_port == 22):
+                        
+                        for ip_range in rule.get('IpRanges', []):
+                            if ip_range.get('CidrIp') == '0.0.0.0/0':
+                                findings.append(SecurityFinding(
+                                    resource_type='EC2',
+                                    resource_id=f"{sg_name} ({sg_id})",
+                                    finding_type='SSH_OPEN_TO_WORLD',
+                                    severity='HIGH',
+                                    description='Security group allows SSH (port 22) from anywhere (0.0.0.0/0)',
+                                    region=region,
+                                    remediation='Restrict SSH access to specific IP ranges or VPN'
+                                ))
+                    
+                    # Check for RDP access from anywhere
+                    if (protocol == 'tcp' and 
+                        from_port == 3389 and to_port == 3389):
+                        
+                        for ip_range in rule.get('IpRanges', []):
+                            if ip_range.get('CidrIp') == '0.0.0.0/0':
+                                findings.append(SecurityFinding(
+                                    resource_type='EC2',
+                                    resource_id=f"{sg_name} ({sg_id})",
+                                    finding_type='RDP_OPEN_TO_WORLD',
+                                    severity='HIGH',
+                                    description='Security group allows RDP (port 3389) from anywhere (0.0.0.0/0)',
+                                    region=region,
+                                    remediation='Restrict RDP access to specific IP ranges or VPN'
+                                ))
+                    
+                    # Check for all traffic from anywhere
+                    if protocol == '-1':  # All protocols
+                        for ip_range in rule.get('IpRanges', []):
+                            if ip_range.get('CidrIp') == '0.0.0.0/0':
+                                findings.append(SecurityFinding(
+                                    resource_type='EC2',
+                                    resource_id=f"{sg_name} ({sg_id})",
+                                    finding_type='ALL_TRAFFIC_OPEN',
+                                    severity='HIGH',
+                                    description='Security group allows all traffic from anywhere (0.0.0.0/0)',
+                                    region=region,
+                                    remediation='Restrict to specific protocols and ports needed'
+                                ))
+                    
+                    # Check for wide port ranges from anywhere
+                    if (protocol == 'tcp' and from_port is not None and to_port is not None):
+                        port_range = to_port - from_port + 1
+                        if port_range > 100:  # Arbitrary threshold for "wide"
+                            for ip_range in rule.get('IpRanges', []):
+                                if ip_range.get('CidrIp') == '0.0.0.0/0':
+                                    findings.append(SecurityFinding(
+                                        resource_type='EC2',
+                                        resource_id=f"{sg_name} ({sg_id})",
+                                        finding_type='WIDE_PORT_RANGE',
+                                        severity='MEDIUM',
+                                        description=f'Security group allows wide port range ({from_port}-{to_port}) from anywhere',
+                                        region=region,
+                                        remediation='Limit to specific ports required for your application'
+                                    ))
+                
+                # Check if security group has no inbound rules but allows outbound
+                if not sg.get('IpPermissions', []) and sg.get('IpPermissionsEgress', []):
+                    # Check if it's used by any instances
+                    try:
+                        reservations = await ec2_client.describe_instances(
+                            Filters=[{'Name': 'instance.group-id', 'Values': [sg_id]}]
+                        )
+                        
+                        has_instances = any(
+                            instance for reservation in reservations.get('Reservations', [])
+                            for instance in reservation.get('Instances', [])
+                            if instance.get('State', {}).get('Name') != 'terminated'
+                        )
+                        
+                        if not has_instances and sg_name != 'default':
+                            findings.append(SecurityFinding(
+                                resource_type='EC2',
+                                resource_id=f"{sg_name} ({sg_id})",
+                                finding_type='UNUSED_SECURITY_GROUP',
+                                severity='LOW',
+                                description='Security group appears to be unused (no attached instances)',
+                                region=region,
+                                remediation='Consider removing unused security groups to reduce complexity'
+                            ))
+                    except Exception:
+                        pass
+                
+    except Exception as e:
+        rprint(f"[red]Error auditing security groups in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_network_acls(ec2_client, region: str) -> List[SecurityFinding]:
+    """Audit Network ACLs for security misconfigurations"""
+    findings = []
+    
+    try:
+        # Get all Network ACLs
+        response = await ec2_client.describe_network_acls()
+        network_acls = response.get('NetworkAcls', [])
+        
+        for nacl in network_acls:
+            nacl_id = nacl['NetworkAclId']
+            is_default = nacl.get('IsDefault', False)
+            vpc_id = nacl.get('VpcId', 'Unknown')
+            
+            # Check entries for overly permissive rules
+            for entry in nacl.get('Entries', []):
+                rule_action = entry.get('RuleAction', 'deny')
+                rule_number = entry.get('RuleNumber', 0)
+                protocol = entry.get('Protocol', '')
+                cidr_block = entry.get('CidrBlock', '')
+                
+                # Skip the default deny rule (rule 32767)
+                if rule_number == 32767:
+                    continue
+                
+                # Check for allow rules from 0.0.0.0/0
+                if (rule_action == 'allow' and 
+                    cidr_block == '0.0.0.0/0' and 
+                    protocol != '-1'):  # Skip the common allow all rule
+                    
+                    port_range = entry.get('PortRange', {})
+                    from_port = port_range.get('From')
+                    to_port = port_range.get('To')
+                    
+                    if from_port == 22 and to_port == 22:
+                        findings.append(SecurityFinding(
+                            resource_type='VPC',
+                            resource_id=f"NACL {nacl_id}",
+                            finding_type='NACL_SSH_OPEN',
+                            severity='MEDIUM',
+                            description='Network ACL allows SSH (port 22) from anywhere',
+                            region=region,
+                            remediation='Consider restricting SSH access in Network ACL'
+                        ))
+                    elif from_port == 3389 and to_port == 3389:
+                        findings.append(SecurityFinding(
+                            resource_type='VPC',
+                            resource_id=f"NACL {nacl_id}",
+                            finding_type='NACL_RDP_OPEN',
+                            severity='MEDIUM',
+                            description='Network ACL allows RDP (port 3389) from anywhere',
+                            region=region,
+                            remediation='Consider restricting RDP access in Network ACL'
+                        ))
+            
+            # Check if default NACL has been modified
+            if is_default:
+                # Default NACLs should typically allow all traffic
+                custom_rules = [e for e in nacl.get('Entries', []) if e.get('RuleNumber', 0) != 32767]
+                if len(custom_rules) > 2:  # More than typical inbound/outbound allow all
+                    findings.append(SecurityFinding(
+                        resource_type='VPC',
+                        resource_id=f"Default NACL {nacl_id}",
+                        finding_type='MODIFIED_DEFAULT_NACL',
+                        severity='LOW',
+                        description='Default Network ACL has been modified from standard configuration',
+                        region=region,
+                        remediation='Consider using custom NACLs instead of modifying default NACL'
+                    ))
+    
+    except Exception as e:
+        rprint(f"[red]Error auditing Network ACLs in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_vpcs(ec2_client, region: str) -> List[SecurityFinding]:
+    """Audit VPCs for security configurations"""
+    findings = []
+    
+    try:
+        # Get all VPCs
+        response = await ec2_client.describe_vpcs()
+        vpcs = response.get('Vpcs', [])
+        
+        for vpc in vpcs:
+            vpc_id = vpc['VpcId']
+            is_default = vpc.get('IsDefault', False)
+            
+            # Check VPC Flow Logs
+            try:
+                flow_logs_response = await ec2_client.describe_flow_logs(
+                    Filters=[
+                        {'Name': 'resource-id', 'Values': [vpc_id]},
+                        {'Name': 'resource-type', 'Values': ['VPC']}
+                    ]
+                )
+                
+                active_flow_logs = [
+                    fl for fl in flow_logs_response.get('FlowLogs', [])
+                    if fl.get('FlowLogStatus') == 'ACTIVE'
+                ]
+                
+                if not active_flow_logs:
+                    findings.append(SecurityFinding(
+                        resource_type='VPC',
+                        resource_id=vpc_id,
+                        finding_type='NO_FLOW_LOGS',
+                        severity='MEDIUM',
+                        description='VPC does not have Flow Logs enabled for network monitoring',
+                        region=region,
+                        remediation='Enable VPC Flow Logs to monitor network traffic'
+                    ))
+            except Exception:
+                pass
+            
+            # Check for Internet Gateways
+            try:
+                igw_response = await ec2_client.describe_internet_gateways(
+                    Filters=[{'Name': 'attachment.vpc-id', 'Values': [vpc_id]}]
+                )
+                
+                internet_gateways = igw_response.get('InternetGateways', [])
+                
+                if internet_gateways and not is_default:
+                    # This is not necessarily a finding, but worth noting for security review
+                    findings.append(SecurityFinding(
+                        resource_type='VPC',
+                        resource_id=vpc_id,
+                        finding_type='INTERNET_GATEWAY_ATTACHED',
+                        severity='LOW',
+                        description='VPC has Internet Gateway attached - ensure proper subnet isolation',
+                        region=region,
+                        remediation='Review public/private subnet configuration and routing'
+                    ))
+            except Exception:
+                pass
+            
+            # Check DHCP Options
+            dhcp_options_id = vpc.get('DhcpOptionsId')
+            if dhcp_options_id and dhcp_options_id != 'default':
+                try:
+                    dhcp_response = await ec2_client.describe_dhcp_options(
+                        DhcpOptionsIds=[dhcp_options_id]
+                    )
+                    
+                    dhcp_options = dhcp_response.get('DhcpOptions', [])
+                    if dhcp_options:
+                        # Check for custom DNS servers
+                        for option_set in dhcp_options:
+                            for config in option_set.get('DhcpConfigurations', []):
+                                if config.get('Key') == 'domain-name-servers':
+                                    values = [v.get('Value') for v in config.get('Values', [])]
+                                    if 'AmazonProvidedDNS' not in values:
+                                        findings.append(SecurityFinding(
+                                            resource_type='VPC',
+                                            resource_id=vpc_id,
+                                            finding_type='CUSTOM_DNS_SERVERS',
+                                            severity='LOW',
+                                            description='VPC uses custom DNS servers instead of Amazon provided',
+                                            region=region,
+                                            remediation='Verify custom DNS servers are secure and reliable'
+                                        ))
+                except Exception:
+                    pass
+    
+    except Exception as e:
+        rprint(f"[red]Error auditing VPCs in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_subnets(ec2_client, region: str) -> List[SecurityFinding]:
+    """Audit Subnets for security configurations"""
+    findings = []
+    
+    try:
+        # Get all subnets
+        response = await ec2_client.describe_subnets()
+        subnets = response.get('Subnets', [])
+        
+        for subnet in subnets:
+            subnet_id = subnet['SubnetId']
+            vpc_id = subnet.get('VpcId', 'Unknown')
+            availability_zone = subnet.get('AvailabilityZone', 'Unknown')
+            map_public_ip = subnet.get('MapPublicIpOnLaunch', False)
+            
+            # Check for auto-assign public IP
+            if map_public_ip:
+                # Check if this is actually a public subnet (has route to IGW)
+                try:
+                    # Get route table for this subnet
+                    route_tables_response = await ec2_client.describe_route_tables(
+                        Filters=[
+                            {'Name': 'association.subnet-id', 'Values': [subnet_id]}
+                        ]
+                    )
+                    
+                    route_tables = route_tables_response.get('RouteTables', [])
+                    
+                    # If no explicit association, check main route table for the VPC
+                    if not route_tables:
+                        route_tables_response = await ec2_client.describe_route_tables(
+                            Filters=[
+                                {'Name': 'vpc-id', 'Values': [vpc_id]},
+                                {'Name': 'association.main', 'Values': ['true']}
+                            ]
+                        )
+                        route_tables = route_tables_response.get('RouteTables', [])
+                    
+                    has_igw_route = False
+                    for route_table in route_tables:
+                        for route in route_table.get('Routes', []):
+                            if (route.get('DestinationCidrBlock') == '0.0.0.0/0' and 
+                                route.get('GatewayId', '').startswith('igw-')):
+                                has_igw_route = True
+                                break
+                    
+                    if has_igw_route:
+                        findings.append(SecurityFinding(
+                            resource_type='VPC',
+                            resource_id=f"Subnet {subnet_id}",
+                            finding_type='PUBLIC_SUBNET_AUTO_IP',
+                            severity='MEDIUM',
+                            description='Public subnet automatically assigns public IP addresses',
+                            region=region,
+                            remediation='Consider disabling auto-assign public IP and use explicit allocation'
+                        ))
+                    else:
+                        findings.append(SecurityFinding(
+                            resource_type='VPC',
+                            resource_id=f"Subnet {subnet_id}",
+                            finding_type='PRIVATE_SUBNET_AUTO_IP',
+                            severity='HIGH',
+                            description='Private subnet configured to auto-assign public IPs',
+                            region=region,
+                            remediation='Disable auto-assign public IP for private subnets'
+                        ))
+                        
+                except Exception:
+                    pass
+    
+    except Exception as e:
+        rprint(f"[red]Error auditing subnets in region {region}: {e}[/red]")
+    
+    return findings 

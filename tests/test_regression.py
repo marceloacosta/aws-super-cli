@@ -7,6 +7,7 @@ Tests for specific bugs and issues that have been fixed
 import pytest
 from typer.testing import CliRunner
 from awsx.cli import app
+from unittest.mock import patch
 
 
 class TestRegressionIssues:
@@ -195,6 +196,95 @@ class TestOutputFormatConsistency:
         # This is acceptable Typer behavior for invalid flags
         result = self.runner.invoke(app, ["audit", "--invalid-flag"])
         assert result.exit_code == 2  # Expected for invalid flags
+
+
+class TestNetworkSecurityFeatures:
+    """Regression tests for network security audit functionality"""
+    
+    def setup_method(self):
+        self.runner = CliRunner()
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_network_service_in_default_audit(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: Ensure network service is included in default audit
+        
+        Network security audit should be part of the default audit services
+        """
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 100,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--summary"])
+        assert result.exit_code == 0
+        
+        # Verify network is in default services
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert 'network' in services, "Network service should be in default audit services"
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_network_only_audit_works(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: Network-only audit should work correctly
+        
+        Should be able to run audit with only network service
+        """
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 85,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--services", "network", "--summary"])
+        assert result.exit_code == 0
+        assert "Security Audit Summary" in result.stdout
+        
+        # Verify only network service was called
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert services == ['network'], "Should only audit network service when explicitly specified"
+    
+    def test_help_includes_network_audit_examples(self):
+        """
+        REGRESSION TEST: Help should include network audit examples
+        
+        Users should see how to use network security audit
+        """
+        result = self.runner.invoke(app, ["help"])
+        assert result.exit_code == 0
+        
+        # Should mention network security audit
+        assert "--services network" in result.stdout, "Help should show network service option"
+        assert "Security Auditing:" in result.stdout, "Help should have security auditing section"
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary') 
+    def test_audit_services_help_mentions_network(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: Audit command help should mention network service
+        
+        When users run audit --help, they should see network as an option
+        """
+        result = self.runner.invoke(app, ["audit", "--help"])
+        assert result.exit_code == 0
+        
+        # Should mention network in services help text
+        assert "s3, iam, network" in result.stdout, "Audit help should list network as available service"
 
 
 if __name__ == "__main__":

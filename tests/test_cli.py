@@ -284,6 +284,54 @@ class TestAuditCommand:
         assert "Security Audit Summary" in result.stdout
         assert "65/100" in result.stdout
         assert "High Risk: 1" in result.stdout
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_audit_network_services_option(self, mock_summary, mock_audit):
+        """Test network security audit with services option"""
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 85,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--services", "network", "--summary"])
+        assert result.exit_code == 0
+        assert "Security Audit Summary" in result.stdout
+        
+        # Verify audit was called with network services
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        assert 'network' in call_args.kwargs['services']
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_audit_default_services_include_network(self, mock_summary, mock_audit):
+        """Test that default audit includes network security"""
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 90,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--summary"])
+        assert result.exit_code == 0
+        
+        # Verify audit was called with default services including network
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert 's3' in services
+        assert 'iam' in services
+        assert 'network' in services
 
 
 if __name__ == "__main__":
