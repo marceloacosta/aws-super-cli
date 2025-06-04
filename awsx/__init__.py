@@ -1,5 +1,5 @@
 """AWS Super CLI - Multi-account AWS resource discovery with service-level cost intelligence."""
 
-__version__ = "0.2.2"
+__version__ = "0.9.0"
 __author__ = "Marcelo Acosta"
 __description__ = "See your AWS resources across all accounts in one command" 
