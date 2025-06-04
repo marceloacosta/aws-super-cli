@@ -1,0 +1,73 @@
+# AWS Super CLI - Cursor Rules & Development Workflow
+
+## 🎯 Project Context
+- **Tool Name**: AWS Super CLI (command: `aws-super-cli`, NOT `awsx`)
+- **Mission**: AWS security and discovery tool that solves real engineer pain points
+- **Language**: Python 3.10+ with async/await, Typer, Rich, boto3/aioboto3
+- **Current Version**: v0.8.x (check pyproject.toml for exact version)
+
+## 📊 Data-Driven Priorities (Based on User Polls)
+1. **71% pain point**: Security misconfigurations in new accounts → HIGHEST PRIORITY
+2. **43% pain point**: Switching between AWS accounts → ✅ ALREADY SOLVED
+3. **37% pain point**: Dealing with long ARNs → Second priority
+
+## 🚨 MANDATORY Development Workflow Rules
+1. **ONE FEATURE AT A TIME** - Never work on multiple features simultaneously
+2. **ALWAYS UPDATE dev_notes_internal.md** - Before starting AND after completing any feature
+3. **READ dev_notes_internal.md FIRST** - Check current status and next actions before any work
+4. **FEATURE BRANCHES** - Use descriptive names like `feature/security-audit` or `feature/arn-intelligence`
+5. **COMMIT & PUSH** - Every completed feature goes to GitHub immediately
+6. **PYPI RELEASE** - Issue new release after every feature completion
+7. **NO PARALLEL DEVELOPMENT** - Finish current feature completely before next
+
+## 📋 Current Implementation Status
+- ✅ Multi-account support (addresses 43% account switching pain)
+- ✅ 7 AWS services (EC2, S3, RDS, Lambda, ELB, Route53, IAM)
+- ✅ Beautiful Rich table output
+- 🔲 Security audit features (NEXT PRIORITY - addresses 71% security pain)
+- 🔲 Smart ARN handling (addresses 37% ARN pain)
+
+## 🎯 Next Feature to Implement
+**IMMEDIATE PRIORITY**: `aws-super-cli audit` command
+- Target: Address 71% security misconfiguration pain point
+- Start with: S3 public bucket detection
+- Then: IAM overprivilege detection
+- Goal: Security scoring and risk assessment
+
+## 💻 Technical Guidelines
+- **Python async/await** for multi-account operations
+- **Read-only operations** - Never modify AWS resources
+- **Standard AWS credential chain** - No custom credential storage
+- **Rich tables** for beautiful output
+- **Typer** for CLI framework
+- **aioboto3** for async AWS operations
+
+## 🚫 Do NOT
+- Work on multiple features simultaneously
+- Skip updating dev_notes_internal.md
+- Use "awsx" (old name) - always use "aws-super-cli"
+- Call it "copilot" (implies AI, which this tool doesn't have)
+- Implement cost features before security features
+- Add ARN features before security audit is complete
+
+## 📝 Before Starting ANY Work
+1. Read dev_notes_internal.md current status
+2. Confirm which feature is next priority
+3. Update dev_notes_internal.md with "🔄 IN PROGRESS" status
+4. Create feature branch
+5. Implement feature completely
+6. Test with real AWS accounts
+7. Update dev_notes_internal.md with "✅ COMPLETED" 
+8. Commit, push, and prepare PyPI release
+
+## 🎯 Success Criteria
+- Address poll-identified pain points in priority order
+- Maintain one-feature-at-a-time discipline
+- Keep dev_notes_internal.md always current
+- Each feature release should feel immediately valuable to users
+
+## 🔍 When in Doubt
+- Check dev_notes_internal.md for current roadmap
+- Prioritize security features (71% pain point)
+- Follow the one-feature-at-a-time rule strictly
+- Ask user for clarification rather than assume 

@@ -9,6 +9,7 @@ from rich import print as rprint
 from .services import ec2, s3, vpc, rds, elb, iam
 from .services import lambda_
 from .services import cost as cost_analysis
+from .services import audit as audit_service
 from .aws import aws_session
 
 app = typer.Typer(help="AWS Super CLI – one-command resource visibility")
@@ -694,6 +695,148 @@ def accounts():
             console.print("")
             for message in help_messages:
                 console.print(message)
+
+
+@app.command()
+def audit(
+    services: Optional[str] = typer.Option("s3,iam", "--services", help="Comma-separated services to audit (s3, iam)"),
+    region: Optional[str] = typer.Option(None, "--region", "-r", help="Specific region to query"),
+    all_regions: bool = typer.Option(True, "--all-regions/--no-all-regions", help="Query all regions (default) or current region only"),
+    all_accounts: bool = typer.Option(False, "--all-accounts", help="Query all accessible AWS accounts"),
+    accounts: Optional[str] = typer.Option(None, "--accounts", help="Comma-separated profiles or pattern (e.g., 'prod-*,staging')"),
+    summary_only: bool = typer.Option(False, "--summary", help="Show only summary statistics"),
+):
+    """Run security audit to identify misconfigurations"""
+    
+    # Parse services
+    service_list = [s.strip().lower() for s in services.split(',')]
+    
+    # Determine which profiles/accounts to query
+    profiles_to_query = []
+    
+    if all_accounts:
+        # Query all accessible accounts
+        try:
+            accounts_info = asyncio.run(aws_session.multi_account.discover_accounts())
+            profiles_to_query = [acc['profile'] for acc in accounts_info]
+            
+            if not profiles_to_query:
+                console.print("[yellow]No accessible AWS accounts found.[/yellow]")
+                console.print("\n[dim]Run 'aws-super-cli accounts' to see available profiles[/dim]")
+                return
+                
+            console.print(f"[dim]Auditing {len(profiles_to_query)} accounts: {', '.join(profiles_to_query)}[/dim]")
+            
+        except Exception as e:
+            console.print(f"[red]Error discovering accounts: {e}[/red]")
+            return
+    elif accounts:
+        # Query specific accounts or patterns
+        if ',' in accounts:
+            # Multiple accounts specified
+            account_patterns = [p.strip() for p in accounts.split(',')]
+        else:
+            # Single account or pattern
+            account_patterns = [accounts.strip()]
+        
+        # Expand patterns
+        for pattern in account_patterns:
+            if '*' in pattern:
+                # Pattern matching
+                matched = aws_session.multi_account.get_profiles_by_pattern(pattern.replace('*', ''))
+                profiles_to_query.extend(matched)
+            else:
+                # Exact profile name
+                profiles_to_query.append(pattern)
+        
+        if not profiles_to_query:
+            console.print(f"[yellow]No profiles found matching: {accounts}[/yellow]")
+            console.print("\n[dim]Run 'aws-super-cli accounts' to see available profiles[/dim]")
+            return
+            
+        console.print(f"[dim]Auditing accounts: {', '.join(profiles_to_query)}[/dim]")
+    else:
+        # Single account (current profile)
+        profiles_to_query = None  # Will use current profile by default
+        console.print("[dim]Auditing current account...[/dim]")
+    
+    # Determine regions to query
+    if region:
+        regions_to_query = [region]
+    elif all_regions:
+        regions_to_query = aws_session.get_available_regions('s3')  # Use S3 regions as base
+    else:
+        # Current region only
+        try:
+            import boto3
+            session = boto3.Session()
+            current_region = session.region_name or 'us-east-1'
+            regions_to_query = [current_region]
+        except:
+            regions_to_query = ['us-east-1']
+    
+    try:
+        # Run the security audit
+        findings = asyncio.run(audit_service.run_security_audit(
+            services=service_list,
+            regions=regions_to_query,
+            all_regions=all_regions,
+            profiles=profiles_to_query
+        ))
+        
+        # Generate summary
+        summary = audit_service.get_security_summary(findings)
+        
+        if summary_only or not findings:
+            # Show summary only
+            console.print(f"\n[bold]Security Audit Summary[/bold]")
+            console.print(f"Security Score: [{'red' if summary['score'] < 70 else 'yellow' if summary['score'] < 90 else 'green'}]{summary['score']}/100[/]")
+            console.print(f"Total Findings: {summary['total']}")
+            
+            if summary['total'] > 0:
+                console.print(f"  High Risk: [red]{summary['high']}[/red]")
+                console.print(f"  Medium Risk: [yellow]{summary['medium']}[/yellow]")
+                console.print(f"  Low Risk: [green]{summary['low']}[/green]")
+                
+                # Show breakdown by service
+                console.print(f"\nFindings by Service:")
+                for service, count in summary['services'].items():
+                    console.print(f"  {service}: {count}")
+            else:
+                console.print("[green]No security issues found[/green]")
+            
+            return
+        
+        # Show detailed findings
+        show_account = profiles_to_query is not None and len(profiles_to_query) > 1
+        table = audit_service.create_audit_table(findings, show_account=show_account)
+        console.print(table)
+        
+        # Show summary at the end
+        console.print(f"\n[bold]Security Summary[/bold]")
+        console.print(f"Security Score: [{'red' if summary['score'] < 70 else 'yellow' if summary['score'] < 90 else 'green'}]{summary['score']}/100[/]")
+        console.print(f"Found {summary['total']} security findings:")
+        console.print(f"  [red]High Risk: {summary['high']}[/red]")
+        console.print(f"  [yellow]Medium Risk: {summary['medium']}[/yellow]")
+        console.print(f"  [green]Low Risk: {summary['low']}[/green]")
+        
+        # Recommendations
+        if summary['high'] > 0:
+            console.print(f"\n[red]PRIORITY: Address {summary['high']} high-risk findings immediately[/red]")
+        elif summary['medium'] > 0:
+            console.print(f"\n[yellow]RECOMMENDED: Review {summary['medium']} medium-risk findings[/yellow]")
+        else:
+            console.print(f"\n[green]Account security looks good! Consider reviewing {summary['low']} low-risk items[/green]")
+            
+        if profiles_to_query:
+            account_count = len(profiles_to_query)
+            console.print(f"\n[dim]Audit completed across {account_count} accounts[/dim]")
+        
+    except Exception as e:
+        console.print(f"[red]Error running security audit: {e}[/red]")
+        if "--debug" in str(e):
+            import traceback
+            console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
 
 if __name__ == "__main__":
