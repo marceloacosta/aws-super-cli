@@ -14,21 +14,7 @@ from .aws import aws_session
 
 app = typer.Typer(
     name="aws-super-cli",
-    help="""
-AWS Super CLI – Your AWS resource discovery and security tool
-
-Quick examples:
-  aws-super-cli ls ec2                    # List EC2 instances
-  aws-super-cli audit                     # Run security audit  
-  aws-super-cli help                      # Show detailed examples
-  aws-super-cli accounts                  # List available accounts
-
-Common use cases:
-  • Resource discovery across multiple accounts
-  • Security auditing and compliance checking
-  • Cost analysis and optimization
-  • Quick AWS environment overview
-    """,
+    help="AWS Super CLI – Your AWS resource discovery and security tool",
     epilog="Need help? Run 'aws-super-cli help' for detailed examples and usage patterns.",
     context_settings={"help_option_names": ["-h", "--help"]},
     no_args_is_help=True,
@@ -854,36 +840,36 @@ def audit(
 @app.command(name="help", help="Show help information and common examples")
 def help_command():
     """Show help information"""
-    print()
-    print("[bold]AWS Super CLI - Quick Reference[/bold]")
-    print()
-    print("[bold]Most Common Commands:[/bold]")
-    print("  [cyan]aws-super-cli ls ec2[/cyan]                    # List EC2 instances")
-    print("  [cyan]aws-super-cli ls s3[/cyan]                     # List S3 buckets") 
-    print("  [cyan]aws-super-cli audit[/cyan]                     # Run security audit")
-    print("  [cyan]aws-super-cli accounts[/cyan]                  # Show available accounts")
-    print("  [cyan]aws-super-cli cost summary[/cyan]              # Cost overview")
-    print()
-    print("[bold]Resource Discovery:[/bold]")
-    print("  [cyan]aws-super-cli ls ec2 --all-accounts[/cyan]     # EC2 across all accounts")
-    print("  [cyan]aws-super-cli ls rds --engine postgres[/cyan]  # Find PostgreSQL databases")
-    print("  [cyan]aws-super-cli ls lambda --runtime python[/cyan] # Find Python functions")
-    print()
-    print("[bold]Security Auditing:[/bold]")
-    print("  [cyan]aws-super-cli audit --summary[/cyan]           # Quick security overview")
-    print("  [cyan]aws-super-cli audit --all-accounts[/cyan]      # Audit all accounts")
-    print()
-    print("[bold]Cost Analysis:[/bold]")
-    print("  [cyan]aws-super-cli cost summary[/cyan]              # Overall cost trends")
-    print("  [cyan]aws-super-cli cost top-spend[/cyan]            # Biggest cost services")
-    print("  [cyan]aws-super-cli cost credits[/cyan]              # Credit usage analysis")
-    print()
-    print("[bold]For detailed help:[/bold]")
-    print("  [cyan]aws-super-cli --help[/cyan]                    # Full command reference")
-    print("  [cyan]aws-super-cli ls --help[/cyan]                 # Resource listing help")
-    print("  [cyan]aws-super-cli audit --help[/cyan]              # Security audit help")
-    print("  [cyan]aws-super-cli cost --help[/cyan]               # Cost analysis help")
-    print()
+    rprint()
+    rprint("[bold]AWS Super CLI - Quick Reference[/bold]")
+    rprint()
+    rprint("[bold]Most Common Commands:[/bold]")
+    rprint("  [cyan]aws-super-cli ls ec2[/cyan]                    # List EC2 instances")
+    rprint("  [cyan]aws-super-cli ls s3[/cyan]                     # List S3 buckets") 
+    rprint("  [cyan]aws-super-cli audit[/cyan]                     # Run security audit")
+    rprint("  [cyan]aws-super-cli accounts[/cyan]                  # Show available accounts")
+    rprint("  [cyan]aws-super-cli cost summary[/cyan]              # Cost overview")
+    rprint()
+    rprint("[bold]Resource Discovery:[/bold]")
+    rprint("  [cyan]aws-super-cli ls ec2 --all-accounts[/cyan]     # EC2 across all accounts")
+    rprint("  [cyan]aws-super-cli ls rds --engine postgres[/cyan]  # Find PostgreSQL databases")
+    rprint("  [cyan]aws-super-cli ls lambda --runtime python[/cyan] # Find Python functions")
+    rprint()
+    rprint("[bold]Security Auditing:[/bold]")
+    rprint("  [cyan]aws-super-cli audit --summary[/cyan]           # Quick security overview")
+    rprint("  [cyan]aws-super-cli audit --all-accounts[/cyan]      # Audit all accounts")
+    rprint()
+    rprint("[bold]Cost Analysis:[/bold]")
+    rprint("  [cyan]aws-super-cli cost summary[/cyan]              # Overall cost trends")
+    rprint("  [cyan]aws-super-cli cost top-spend[/cyan]            # Biggest cost services")
+    rprint("  [cyan]aws-super-cli cost credits[/cyan]              # Credit usage analysis")
+    rprint()
+    rprint("[bold]For detailed help:[/bold]")
+    rprint("  [cyan]aws-super-cli --help[/cyan]                    # Full command reference")
+    rprint("  [cyan]aws-super-cli ls --help[/cyan]                 # Resource listing help")
+    rprint("  [cyan]aws-super-cli audit --help[/cyan]              # Security audit help")
+    rprint("  [cyan]aws-super-cli cost --help[/cyan]               # Cost analysis help")
+    rprint()
 
 
 if __name__ == "__main__":

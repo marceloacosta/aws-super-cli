@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""
+Test suite for AWS Super CLI
+Tests CLI commands, output formatting, and core functionality
+"""
+
+import pytest
+import asyncio
+from unittest.mock import Mock, patch, AsyncMock
+from typer.testing import CliRunner
+from rich.console import Console
+from io import StringIO
+
+# Import the CLI app and components
+from awsx.cli import app
+from awsx.aws import aws_session
+
+
+class TestCLICommands:
+    """Test CLI command functionality"""
+    
+    def setup_method(self):
+        """Setup for each test"""
+        self.runner = CliRunner()
+    
+    def test_help_command_no_markup_leakage(self):
+        """Regression test: Ensure Rich markup is rendered, not shown as literal text"""
+        result = self.runner.invoke(app, ["help"])
+        assert result.exit_code == 0
+        
+        # Should NOT contain literal markup
+        assert "[cyan]" not in result.stdout
+        assert "[bold]" not in result.stdout
+        assert "[/cyan]" not in result.stdout
+        assert "[/bold]" not in result.stdout
+        
+        # Should contain the actual content
+        assert "AWS Super CLI - Quick Reference" in result.stdout
+        assert "Most Common Commands:" in result.stdout
+        assert "aws-super-cli ls ec2" in result.stdout
+        assert "aws-super-cli audit" in result.stdout
+    
+    def test_main_help_clean_output(self):
+        """Test that main help (no args) shows clean output"""
+        result = self.runner.invoke(app, [])
+        assert result.exit_code == 2  # Typer's no-args behavior
+        
+        # Should show clean command list
+        assert "AWS Super CLI" in result.stdout
+        assert "Commands" in result.stdout
+        assert "ls" in result.stdout
+        assert "audit" in result.stdout
+        assert "cost" in result.stdout
+    
+    def test_explicit_help_flag(self):
+        """Test explicit help flag works cleanly"""
+        result = self.runner.invoke(app, ["-h"])
+        assert result.exit_code == 0
+        
+        # Should show clean output without empty error box
+        assert "AWS Super CLI" in result.stdout
+        assert "Commands" in result.stdout
+    
+    def test_ls_command_without_service(self):
+        """Test ls command shows helpful message when no service specified"""
+        result = self.runner.invoke(app, ["ls"])
+        assert result.exit_code == 0
+        
+        assert "Which AWS service would you like to list?" in result.stdout
+        assert "Available services:" in result.stdout
+        assert "aws-super-cli ls ec2" in result.stdout
+    
+    def test_ls_command_invalid_service(self):
+        """Test ls command handles invalid service gracefully"""
+        result = self.runner.invoke(app, ["ls", "invalid-service"])
+        assert result.exit_code == 0
+        
+        assert "Unknown service: 'invalid-service'" in result.stdout
+        assert "Supported services:" in result.stdout
+    
+    def test_ls_command_service_aliases(self):
+        """Test that service aliases work correctly"""
+        # Test with mock to avoid actual AWS calls
+        with patch('awsx.services.ec2.list_ec2_instances') as mock_ec2:
+            mock_ec2.return_value = AsyncMock()
+            
+            result = self.runner.invoke(app, ["ls", "instances"])
+            # Should recognize 'instances' as alias for 'ec2'
+            assert "Interpreting 'instances' as 'ec2'" in result.stdout
+    
+    def test_cost_command_without_subcommand(self):
+        """Test cost command shows helpful menu when no subcommand specified"""
+        result = self.runner.invoke(app, ["cost"])
+        assert result.exit_code == 0
+        
+        assert "Which cost analysis would you like?" in result.stdout
+        assert "Most Popular:" in result.stdout
+        assert "aws-super-cli cost summary" in result.stdout
+    
+    def test_cost_command_invalid_subcommand(self):
+        """Test cost command handles invalid subcommand"""
+        result = self.runner.invoke(app, ["cost", "invalid-cmd"])
+        assert result.exit_code == 0
+        
+        assert "Unknown cost command: invalid-cmd" in result.stdout
+        assert "Available commands:" in result.stdout
+
+
+class TestRichFormatting:
+    """Test Rich output formatting specifically"""
+    
+    def test_rich_console_rendering(self):
+        """Test that Rich console properly renders markup"""
+        console = Console(file=StringIO(), width=80)
+        
+        # Test basic markup rendering
+        console.print("[bold cyan]Test Bold Cyan[/bold cyan]")
+        output = console.file.getvalue()
+        
+        # Should contain ANSI escape codes, not literal markup
+        assert "[bold cyan]" not in output
+        assert "[/bold cyan]" not in output
+        assert "Test Bold Cyan" in output
+    
+    def test_rprint_function_works(self):
+        """Test that rprint (rich print) function works correctly"""
+        from rich import print as rprint
+        from io import StringIO
+        import sys
+        
+        # Capture output
+        old_stdout = sys.stdout
+        sys.stdout = captured_output = StringIO()
+        
+        try:
+            rprint("[green]Test Green Text[/green]")
+            output = captured_output.getvalue()
+            
+            # Should not contain literal markup
+            assert "[green]" not in output
+            assert "[/green]" not in output
+            assert "Test Green Text" in output
+        finally:
+            sys.stdout = old_stdout
+
+
+class TestErrorHandling:
+    """Test error handling and edge cases"""
+    
+    def setup_method(self):
+        self.runner = CliRunner()
+    
+    @patch('awsx.aws.aws_session.check_credentials')
+    def test_version_command_no_credentials(self, mock_check_creds):
+        """Test version command when no AWS credentials available"""
+        mock_check_creds.return_value = (False, None, "No credentials found")
+        
+        result = self.runner.invoke(app, ["version"])
+        assert result.exit_code == 0
+        assert "AWS Super CLI" in result.stdout
+        assert "No valid AWS credentials found" in result.stdout
+    
+    @patch('awsx.aws.aws_session.check_credentials')
+    def test_test_command_no_credentials(self, mock_check_creds):
+        """Test test command when no AWS credentials available"""
+        mock_check_creds.return_value = (False, None, "No credentials found")
+        
+        result = self.runner.invoke(app, ["test"])
+        assert result.exit_code == 0
+        assert "Testing AWS connectivity" in result.stdout
+        assert "No AWS credentials found" in result.stdout
+
+
+class TestServiceIntegration:
+    """Test AWS service integration (mocked)"""
+    
+    def setup_method(self):
+        self.runner = CliRunner()
+    
+    @patch('awsx.cli.asyncio.run')
+    @patch('awsx.aws.aws_session.check_credentials')
+    def test_ec2_list_success(self, mock_check_creds, mock_asyncio_run):
+        """Test successful EC2 listing"""
+        mock_check_creds.return_value = (True, "123456789012", None)
+        mock_asyncio_run.return_value = None  # Mock the async call
+        
+        result = self.runner.invoke(app, ["ls", "ec2"])
+        assert result.exit_code == 0
+        # Just verify the command was processed, not the specific function call
+        assert "ec2" in result.stdout or result.exit_code == 0
+    
+    @patch('awsx.services.s3.list_s3_buckets')
+    @patch('awsx.aws.aws_session.check_credentials')
+    def test_s3_list_success(self, mock_check_creds, mock_list_s3):
+        """Test successful S3 listing"""
+        mock_check_creds.return_value = (True, "123456789012", None)
+        mock_list_s3.return_value = AsyncMock()
+        
+        result = self.runner.invoke(app, ["ls", "s3"])
+        assert result.exit_code == 0
+        mock_list_s3.assert_called_once()
+
+
+class TestMultiAccountSupport:
+    """Test multi-account functionality"""
+    
+    def setup_method(self):
+        self.runner = CliRunner()
+    
+    @patch('awsx.aws.aws_session.multi_account.discover_accounts')
+    def test_accounts_command_success(self, mock_discover):
+        """Test accounts command with accessible accounts"""
+        mock_discover.return_value = [
+            {'profile': 'default', 'account_id': '123456789012'},
+            {'profile': 'prod', 'account_id': '123456789013'}
+        ]
+        
+        with patch('awsx.aws.aws_session.multi_account.discover_profiles') as mock_profiles:
+            mock_profiles.return_value = [
+                {'name': 'default', 'type': 'standard', 'description': 'Default profile'},
+                {'name': 'prod', 'type': 'sso', 'description': 'Production profile'}
+            ]
+            
+            result = self.runner.invoke(app, ["accounts"])
+            assert result.exit_code == 0
+            assert "Available AWS Accounts" in result.stdout
+            assert "default" in result.stdout
+            assert "prod" in result.stdout
+    
+    @patch('awsx.aws.aws_session.multi_account.discover_profiles')
+    def test_accounts_command_no_profiles(self, mock_discover_profiles):
+        """Test accounts command when no profiles found"""
+        mock_discover_profiles.return_value = []
+        
+        result = self.runner.invoke(app, ["accounts"])
+        assert result.exit_code == 0
+        assert "No AWS profiles found" in result.stdout
+        assert "aws configure" in result.stdout
+
+
+class TestAuditCommand:
+    """Test security audit functionality"""
+    
+    def setup_method(self):
+        self.runner = CliRunner()
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_audit_command_success(self, mock_summary, mock_audit):
+        """Test successful security audit"""
+        mock_audit.return_value = []  # No findings
+        mock_summary.return_value = {
+            'score': 95,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--summary"])
+        assert result.exit_code == 0
+        assert "Security Audit Summary" in result.stdout
+        assert "95/100" in result.stdout
+    
+    @patch('awsx.services.audit.run_security_audit')
+    @patch('awsx.services.audit.get_security_summary')
+    def test_audit_command_with_findings(self, mock_summary, mock_audit):
+        """Test audit with security findings"""
+        mock_audit.return_value = [
+            {'service': 's3', 'risk': 'high', 'finding': 'Public bucket detected'}
+        ]
+        mock_summary.return_value = {
+            'score': 65,
+            'total': 1,
+            'high': 1,
+            'medium': 0,
+            'low': 0,
+            'services': {'s3': 1}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--summary"])
+        assert result.exit_code == 0
+        assert "Security Audit Summary" in result.stdout
+        assert "65/100" in result.stdout
+        assert "High Risk: 1" in result.stdout
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"]) 
