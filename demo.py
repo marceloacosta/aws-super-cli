@@ -1,147 +1,158 @@
 #!/usr/bin/env python3
 """
-AWS Super CLI (awsx) - Demo Script
-Showcases all supported services and their capabilities
+AWS Super CLI (aws-super-cli) - Demo Script
+Demonstrates the capabilities of AWS Super CLI
 """
 
+import asyncio
 import subprocess
+from typing import Dict, Any
 import time
-import sys
+
 from rich.console import Console
-from rich.text import Text
 from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
-console = Console()
 
-def run_awsx_command(cmd):
-    """Run an awsx command and return success status"""
+def run_aws_super_cli_command(cmd):
+    """Run an aws-super-cli command and return success status"""
     try:
         result = subprocess.run(
-            ["python", "-m", "awsx.cli"] + cmd.split(), 
-            capture_output=True, 
+            ["python", "-m", "awsx.cli"] + cmd.split(),
+            capture_output=True,
             text=True,
             timeout=30
         )
-        if result.returncode == 0:
-            print(result.stdout)
-            return True
-        else:
-            console.print(f"[red]Error: {result.stderr}[/red]")
-            return False
+        
+        if result.stdout:
+            console.print(result.stdout)
+        if result.stderr and result.returncode != 0:
+            console.print(f"[red]{result.stderr}[/red]")
+            
+        return result.returncode == 0
     except subprocess.TimeoutExpired:
-        console.print("[yellow]Command timed out[/yellow]")
+        console.print("[red]Command timed out[/red]")
         return False
     except Exception as e:
-        console.print(f"[red]Exception: {e}[/red]")
+        console.print(f"[red]Error: {e}[/red]")
         return False
 
-def demo_header():
+
+console = Console()
+
+def show_header():
     """Show demo header"""
-    title = Text("AWS Super CLI (awsx) - Comprehensive Demo", style="bold blue")
-    subtitle = Text("Multi-account AWS resource discovery across 7 services", style="dim")
-    
+    title = Text("AWS Super CLI (aws-super-cli) - Comprehensive Demo", style="bold blue")
+    panel = Panel(
+        title,
+        title="aws-super-cli",
+        border_style="blue",
+        padding=(1, 2)
+    )
     console.print()
-    console.print(Panel(f"{title}\n{subtitle}", 
-                       title="awsx", 
-                       title_align="center",
-                       border_style="blue"))
+    console.print(panel)
     console.print()
 
-def demo_service(service_name, description, commands):
-    """Demo a specific service"""
-    console.print(f"[bold cyan]📋 {service_name.upper()} Service[/bold cyan]")
-    console.print(f"[dim]{description}[/dim]")
-    console.print()
+
+def demo_command(cmd: str, description: str, show_output: bool = True):
+    """Demo a command with description"""
+    console.print(f"\n[cyan]■ {description}[/cyan]")
     
-    for i, (cmd_desc, cmd) in enumerate(commands, 1):
-        console.print(f"[yellow]{i}. {cmd_desc}[/yellow]")
-        console.print(f"[dim]$ awsx {cmd}[/dim]")
+    if show_output:
+        console.print(f"[dim]$ aws-super-cli {cmd}[/dim]")
         
-        success = run_awsx_command(cmd)
+        success = run_aws_super_cli_command(cmd)
+        
         if not success:
-            console.print("[red]⚠️ This service might not have resources in your account[/red]")
+            console.print("[red]Command failed or had issues[/red]")
         
-        console.print()
-        if i < len(commands):
-            time.sleep(1)  # Brief pause between commands
+        time.sleep(1)  # Brief pause for readability
+    else:
+        console.print(f"[dim]Command: aws-super-cli {cmd}[/dim]")
+
+
+def check_prerequisites():
+    """Check if AWS Super CLI is available"""
+    console.print("[bold]Prerequisites Check[/bold]")
     
-    console.print("─" * 80)
-    console.print()
+    # Check if aws-super-cli is available
+    console.print("[dim]Checking aws-super-cli availability...[/dim]")
+    if not run_aws_super_cli_command("--help > /dev/null 2>&1"):
+        console.print("[red]❌ aws-super-cli not found. Please ensure it's installed.[/red]")
+        console.print("[yellow]Install with: pip install aws-super-cli[/yellow]")
+        return False
+    
+    console.print("[green]✅ aws-super-cli is ready![/green]")
+    
+    return True
+
 
 def main():
-    """Run the comprehensive demo"""
-    demo_header()
+    """Run comprehensive demo"""
+    show_header()
     
-    # Check if awsx is available
-    console.print("[dim]Checking awsx availability...[/dim]")
-    if not run_awsx_command("--help > /dev/null 2>&1"):
-        console.print("[red]❌ awsx not found. Please ensure it's installed.[/red]")
-        sys.exit(1)
-    
-    console.print("[green]✅ awsx is ready![/green]")
+    if not check_prerequisites():
+        return
+        
+    console.print("[bold]🚀 AWS Super CLI Demonstration[/bold]")
     console.print()
-    time.sleep(1)
     
-    # Demo each service
-    services = [
-        ("EC2", "Virtual machines and compute instances", [
-            ("List all EC2 instances across regions", "ls ec2"),
-            ("Show only running instances", "ls ec2 --state running"),
-            ("Find instances with 'prod' in name/tags", "ls ec2 --match prod")
-        ]),
-        
-        ("S3", "Object storage buckets", [
-            ("List all S3 buckets", "ls s3"),
-            ("Find buckets with specific name pattern", "ls s3 --match zircon")
-        ]),
-        
-        ("VPC", "Virtual Private Clouds and networking", [
-            ("List all VPCs across regions", "ls vpc"),
-            ("Show VPCs in specific region", "ls vpc --region us-east-1")
-        ]),
-        
-        ("RDS", "Relational database instances", [
-            ("List all RDS instances", "ls rds"),
-            ("Show PostgreSQL instances only", "ls rds --engine postgres")
-        ]),
-        
-        ("Lambda", "Serverless functions", [
-            ("List all Lambda functions", "ls lambda"),
-            ("Show Python functions only", "ls lambda --runtime python"),
-            ("Find functions with specific name", "ls lambda --match boilerplate")
-        ]),
-        
-        ("ELB", "Load balancers (Classic, Application, Network)", [
-            ("List all load balancers", "ls elb"),
-            ("Show Application Load Balancers only", "ls elb --type application")
-        ]),
-        
-        ("IAM", "Identity and Access Management", [
-            ("List all IAM users and roles", "ls iam"),
-            ("Show IAM users only", "ls iam --iam-type users"),
-            ("Show IAM roles only", "ls iam --iam-type roles")
-        ])
-    ]
+    # System Information
+    console.print("[bold yellow]═══ System Information ═══[/bold yellow]")
+    demo_command("version", "Check AWS Super CLI version and AWS credentials")
+    demo_command("test", "Test AWS connectivity and permissions")
     
-    for service_name, description, commands in services:
-        try:
-            demo_service(service_name, description, commands)
-            time.sleep(2)  # Pause between services
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Demo interrupted by user[/yellow]")
-            break
+    # Account Discovery  
+    console.print("\n[bold yellow]═══ Account & Profile Discovery ═══[/bold yellow]")
+    demo_command("accounts", "List available AWS accounts and profiles")
+    
+    # Resource Discovery
+    console.print("\n[bold yellow]═══ Resource Discovery ═══[/bold yellow]")
+    demo_command("ls ec2", "List EC2 instances")
+    demo_command("ls s3", "List S3 buckets")
+    demo_command("ls iam --iam-type users", "List IAM users")
+    demo_command("ls rds", "List RDS instances")
+    demo_command("ls lambda", "List Lambda functions")
+    
+    # Multi-Account Queries (if available)
+    console.print("\n[bold yellow]═══ Multi-Account Capabilities ═══[/bold yellow]")
+    demo_command("ls ec2 --all-accounts", "List EC2 instances across all accounts", show_output=False)
+    console.print("[dim]Note: This requires multiple AWS profiles configured[/dim]")
+    
+    # Security Auditing
+    console.print("\n[bold yellow]═══ Security Auditing ═══[/bold yellow]")
+    demo_command("audit --summary", "Run comprehensive security audit")
+    demo_command("audit --services network", "Network security audit only", show_output=False)
+    demo_command("audit --services s3", "S3 security audit only", show_output=False)
+    
+    # Cost Analysis
+    console.print("\n[bold yellow]═══ Cost Analysis ═══[/bold yellow]")
+    demo_command("cost summary", "Get cost summary with trends")
+    demo_command("cost top-spend", "Show top spending services", show_output=False)
+    demo_command("cost credits", "Analyze credit usage", show_output=False)
+    
+    # Advanced Features
+    console.print("\n[bold yellow]═══ Advanced Features ═══[/bold yellow]")
+    demo_command("help", "Show comprehensive help", show_output=False)
+    console.print("[dim]Additional advanced options:[/dim]")
+    console.print("[dim]• Filtering: --state, --engine, --runtime, --match[/dim]")
+    console.print("[dim]• Regions: --region, --all-regions[/dim]")
+    console.print("[dim]• Debug: --debug for troubleshooting[/dim]")
     
     # Summary
-    console.print("[bold green]🎉 Demo Complete![/bold green]")
+    console.print("\n[bold green]═══ Demo Complete ═══[/bold green]")
+    console.print("[green]✅ AWS Super CLI demonstration finished![/green]")
     console.print()
-    console.print("[cyan]AWS Super CLI supports:[/cyan]")
-    console.print("• [blue]7 major AWS services[/blue] (EC2, S3, VPC, RDS, Lambda, ELB, IAM)")
-    console.print("• [blue]Cross-region discovery[/blue] (--all-regions by default)")
-    console.print("• [blue]Intelligent filtering[/blue] (--match, --state, --engine, etc.)")
-    console.print("• [blue]Beautiful rich tables[/blue] with color-coded status")
-    console.print("• [blue]Service-specific options[/blue] for advanced filtering")
+    console.print("[bold]Key Capabilities Demonstrated:[/bold]")
+    console.print("• 🔒 Security auditing across S3, IAM, and network infrastructure")
+    console.print("• 🔍 Multi-account resource discovery")
+    console.print("• 💰 Cost analysis with credit tracking")
+    console.print("• 📊 Beautiful rich table output")
+    console.print("• ⚡ Parallel multi-account queries")
     console.print()
-    console.print("[dim]Get started: awsx ls <service> --help[/dim]")
+    console.print("[dim]Get started: aws-super-cli ls <service> --help[/dim]")
+
 
 if __name__ == "__main__":
     main() 
