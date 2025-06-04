@@ -5,9 +5,10 @@ from typing import List, Dict, Any, Optional
 from rich.table import Table
 from rich.console import Console
 from ..aws import aws_session
+from ..utils.arn_intelligence import arn_intelligence
 
 
-def format_iam_data(users_response: Dict[str, Any], roles_response: Dict[str, Any], resource_type: str = 'all') -> List[Dict[str, str]]:
+def format_iam_data(users_response: Dict[str, Any], roles_response: Dict[str, Any], resource_type: str = 'all', show_full_arns: bool = False) -> List[Dict[str, str]]:
     """Format IAM data for display"""
     formatted_resources = []
     
@@ -32,11 +33,16 @@ def format_iam_data(users_response: Dict[str, Any], roles_response: Dict[str, An
                 else:
                     last_activity_str = 'Never'
                 
+                # Smart ARN display
+                arn = user.get('Arn', 'N/A')
+                display_arn = arn_intelligence.format_arn_for_display(arn, show_full_arns) if arn != 'N/A' else 'N/A'
+                
                 formatted_resources.append({
                     'Name': user['UserName'],
                     'Type': 'User',
                     'Status': 'N/A',
-                    'ARN': user.get('Arn', 'N/A'),
+                    'ARN': display_arn,
+                    'Full ARN': arn,  # Keep full ARN for reference
                     'Path': user.get('Path', '/'),
                     'Created': created_str,
                     'Last Activity': last_activity_str,
@@ -61,11 +67,16 @@ def format_iam_data(users_response: Dict[str, Any], roles_response: Dict[str, An
                 max_session = role.get('MaxSessionDuration', 3600)
                 max_session_str = f"{max_session//3600}h {(max_session%3600)//60}m" if max_session >= 3600 else f"{max_session//60}m"
                 
+                # Smart ARN display
+                arn = role.get('Arn', 'N/A')
+                display_arn = arn_intelligence.format_arn_for_display(arn, show_full_arns) if arn != 'N/A' else 'N/A'
+                
                 formatted_resources.append({
                     'Name': role['RoleName'],
                     'Type': 'Role',
                     'Status': 'N/A',
-                    'ARN': role.get('Arn', 'N/A'),
+                    'ARN': display_arn,
+                    'Full ARN': arn,  # Keep full ARN for reference
                     'Path': role.get('Path', '/'),
                     'Created': created_str,
                     'Last Activity': 'N/A',
@@ -75,10 +86,13 @@ def format_iam_data(users_response: Dict[str, Any], roles_response: Dict[str, An
     return formatted_resources
 
 
-def create_iam_table(resources: List[Dict[str, str]], columns: List[str] = None) -> Table:
+def create_iam_table(resources: List[Dict[str, str]], columns: List[str] = None, show_full_arns: bool = False) -> Table:
     """Create a rich table for IAM resources"""
     if not columns:
-        columns = ['Name', 'Type', 'Path', 'Created', 'Last Activity']
+        if show_full_arns:
+            columns = ['Name', 'Type', 'Full ARN', 'Created', 'Last Activity']
+        else:
+            columns = ['Name', 'Type', 'ARN', 'Path', 'Created', 'Last Activity']
     
     table = Table(title="IAM Resources", show_header=True, header_style="bold magenta")
     
@@ -88,6 +102,10 @@ def create_iam_table(resources: List[Dict[str, str]], columns: List[str] = None)
             table.add_column(col, style="cyan", min_width=20)
         elif col == 'Type':
             table.add_column(col, style="blue", min_width=8)
+        elif col == 'ARN':
+            table.add_column(col, style="dim cyan", min_width=15)
+        elif col == 'Full ARN':
+            table.add_column(col, style="dim cyan", min_width=30)
         elif col == 'Path':
             table.add_column(col, style="dim", min_width=8)
         elif col == 'Last Activity':
@@ -123,7 +141,8 @@ def create_iam_table(resources: List[Dict[str, str]], columns: List[str] = None)
 
 async def list_iam_resources(
     match: str = None,
-    resource_type: str = 'all'
+    resource_type: str = 'all',
+    show_full_arns: bool = False
 ) -> List[Dict[str, str]]:
     """List IAM resources (users and roles) with optional filters"""
     
@@ -150,7 +169,7 @@ async def list_iam_resources(
         )
     
     # Format the data
-    resources = format_iam_data(users_response, roles_response, resource_type)
+    resources = format_iam_data(users_response, roles_response, resource_type, show_full_arns)
     
     # Apply match filter (fuzzy search on name, type, and path)
     if match:

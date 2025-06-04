@@ -5,12 +5,14 @@ from typing import List, Optional, Dict, Any
 import typer
 from rich.console import Console
 from rich import print as rprint
+from rich.table import Table
 
 from .services import ec2, s3, vpc, rds, elb, iam
 from .services import lambda_
 from .services import cost as cost_analysis
 from .services import audit as audit_service
 from .aws import aws_session
+from .utils.arn_intelligence import arn_intelligence
 
 app = typer.Typer(
     name="aws-super-cli",
@@ -30,6 +32,7 @@ def list_resources(
     accounts: Optional[str] = typer.Option(None, "--accounts", help="Comma-separated profiles or pattern (e.g., 'prod-*,staging')"),
     match: Optional[str] = typer.Option(None, "-m", "--match", help="Filter resources by name/tags (fuzzy match)"),
     columns: Optional[str] = typer.Option(None, "-c", "--columns", help="Comma-separated list of columns to display"),
+    show_full_arns: bool = typer.Option(False, "--show-full-arns", help="Show full ARNs instead of smart truncated versions"),
     # EC2 specific filters
     state: Optional[str] = typer.Option(None, "--state", help="Filter EC2 instances by state (running, stopped, etc.)"),
     instance_type: Optional[str] = typer.Option(None, "--instance-type", help="Filter EC2 instances by instance type"),
@@ -206,12 +209,24 @@ def list_resources(
                 match=match
             ))
         elif service == "iam":
-            asyncio.run(iam.list_iam_resources(
-                regions=region.split(',') if region else None,
-                all_regions=all_regions,
-                iam_type=iam_type,
-                match=match
-            ))
+            # IAM service call with proper parameters
+            async def run_iam_listing():
+                resources = await iam.list_iam_resources(
+                    match=match,
+                    resource_type=iam_type or 'all',
+                    show_full_arns=show_full_arns
+                )
+                if resources:
+                    table = iam.create_iam_table(
+                        resources, 
+                        columns=columns.split(',') if columns else None,
+                        show_full_arns=show_full_arns
+                    )
+                    console.print(table)
+                else:
+                    console.print("[yellow]No IAM resources found matching your criteria[/yellow]")
+            
+            asyncio.run(run_iam_listing())
         else:
             # This shouldn't happen now due to validation above, but keep as fallback
             rprint(f"Multi-account support for {service} coming soon!")
@@ -856,6 +871,11 @@ def help_command():
     rprint("  [cyan]aws-super-cli audit --services network[/cyan]  # Network security only")
     rprint("  [cyan]aws-super-cli audit --services s3,iam[/cyan]   # S3 and IAM audit only")
     rprint()
+    rprint("[bold]ARN Intelligence:[/bold]")
+    rprint("  [cyan]aws-super-cli explain arn:aws:iam::123:user/john[/cyan] # Explain an ARN")
+    rprint("  [cyan]aws-super-cli ls iam --show-full-arns[/cyan]    # Show full ARNs")
+    rprint("  [cyan]aws-super-cli ls iam[/cyan]                     # Smart ARN display (default)")
+    rprint()
     rprint("[bold]Cost Analysis:[/bold]")
     rprint("  [cyan]aws-super-cli cost summary[/cyan]              # Overall cost trends")
     rprint("  [cyan]aws-super-cli cost top-spend[/cyan]            # Biggest cost services")
@@ -866,6 +886,69 @@ def help_command():
     rprint("  [cyan]aws-super-cli ls --help[/cyan]                 # Resource listing help")
     rprint("  [cyan]aws-super-cli audit --help[/cyan]              # Security audit help")
     rprint("  [cyan]aws-super-cli cost --help[/cyan]               # Cost analysis help")
+    rprint()
+
+
+@app.command(name="explain", help="Explain AWS ARNs and break them down into components")
+def explain_arn(
+    arn: str = typer.Argument(..., help="ARN to explain (e.g., arn:aws:iam::123456789012:user/john)")
+):
+    """Explain an AWS ARN and break it down into components"""
+    
+    if not arn.startswith('arn:'):
+        rprint(f"[red]Error: '{arn}' does not appear to be a valid ARN[/red]")
+        rprint()
+        rprint("[bold]ARN format:[/bold]")
+        rprint("  arn:partition:service:region:account:resource")
+        rprint()
+        rprint("[bold]Examples:[/bold]")
+        rprint("  [cyan]aws-super-cli explain arn:aws:iam::123456789012:user/john[/cyan]")
+        rprint("  [cyan]aws-super-cli explain arn:aws:ec2:us-east-1:123456789012:instance/i-1234567890abcdef0[/cyan]")
+        rprint("  [cyan]aws-super-cli explain arn:aws:s3:::my-bucket[/cyan]")
+        return
+    
+    # Parse and explain the ARN
+    explanation = arn_intelligence.explain_arn(arn)
+    
+    if "error" in explanation:
+        rprint(f"[red]Error: {explanation['error']}[/red]")
+        return
+    
+    # Create a beautiful explanation table
+    table = Table(title="ARN Breakdown", show_header=True, header_style="bold magenta")
+    table.add_column("Component", style="cyan", min_width=15)
+    table.add_column("Value", style="green", min_width=20)
+    table.add_column("Description", style="dim", min_width=30)
+    
+    # Add rows for each component
+    for component, details in explanation.items():
+        if component == "ARN":
+            continue  # Skip the full ARN row
+        
+        # Split the details into value and description
+        if " (" in details and details.endswith(")"):
+            value, description = details.split(" (", 1)
+            description = description.rstrip(")")
+        else:
+            value = details
+            description = ""
+        
+        table.add_row(component, value, description)
+    
+    rprint()
+    console.print(table)
+    rprint()
+    
+    # Show the human-readable version
+    human_name = arn_intelligence.get_human_readable_name(arn)
+    rprint(f"[bold]Human-readable name:[/bold] [green]{human_name}[/green]")
+    
+    # Show smart truncated versions
+    rprint()
+    rprint("[bold]Display options:[/bold]")
+    rprint(f"  Short (20 chars): [yellow]{arn_intelligence.smart_truncate(arn, 20)}[/yellow]")
+    rprint(f"  Medium (30 chars): [yellow]{arn_intelligence.smart_truncate(arn, 30)}[/yellow]")
+    rprint(f"  Long (50 chars): [yellow]{arn_intelligence.smart_truncate(arn, 50)}[/yellow]")
     rprint()
 
 
