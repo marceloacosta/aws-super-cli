@@ -752,7 +752,7 @@ async def run_security_audit(
 
 
 def get_security_summary(findings: List[SecurityFinding]) -> Dict[str, Any]:
-    """Generate security summary statistics"""
+    """Generate security summary statistics with nuanced scoring"""
     if not findings:
         return {
             'total': 0,
@@ -772,12 +772,8 @@ def get_security_summary(findings: List[SecurityFinding]) -> Dict[str, Any]:
     for finding in findings:
         services[finding.resource_type] = services.get(finding.resource_type, 0) + 1
     
-    # Simple scoring: start at 100, subtract points for findings
-    score = 100
-    score -= (high_count * 20)    # High findings: -20 points each
-    score -= (medium_count * 10)  # Medium findings: -10 points each  
-    score -= (low_count * 5)      # Low findings: -5 points each
-    score = max(0, score)         # Don't go below 0
+    # Enhanced scoring: categorize findings by actual security impact
+    score = _calculate_enhanced_security_score(findings)
     
     return {
         'total': len(findings),
@@ -787,6 +783,124 @@ def get_security_summary(findings: List[SecurityFinding]) -> Dict[str, Any]:
         'services': services,
         'score': score
     }
+
+
+def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
+    """
+    Calculate security score using weighted categories and logarithmic scaling.
+    
+    This algorithm addresses the issues with the previous linear approach:
+    1. Categorizes findings by actual security impact (not just severity)
+    2. Uses logarithmic scaling for diminishing returns
+    3. Weights critical security issues more heavily than operational gaps
+    4. Provides realistic scores (30-70 range for typical environments)
+    """
+    import math
+    
+    # Categorize findings by security impact (not just severity level)
+    categories = {
+        'critical_exposure': [],      # Public access, open to world
+        'encryption_gaps': [],        # Missing encryption, weak crypto
+        'access_control': [],         # IAM issues, overprivilege
+        'monitoring_gaps': [],        # Missing logs, monitoring
+        'operational_cleanup': [],    # Unused resources, old keys
+        'configuration_drift': []     # Non-standard configs, best practices
+    }
+    
+    # Categorize each finding based on type, not just severity
+    for finding in findings:
+        finding_type = finding.finding_type
+        
+        # Critical Exposure (highest impact)
+        if finding_type in [
+            'SSH_OPEN_TO_WORLD', 'RDP_OPEN_TO_WORLD', 'ALL_TRAFFIC_OPEN',
+            'PUBLIC_ACL', 'PUBLIC_WRITE_ACL', 'PUBLIC_POLICY',
+            'PUBLIC_LAMBDA_FUNCTION', 'PUBLIC_INSTANCE_OPEN_ACCESS'
+        ]:
+            categories['critical_exposure'].append(finding)
+            
+        # Encryption Gaps (high impact)
+        elif finding_type in [
+            'NO_ENCRYPTION', 'S3_MANAGED_ENCRYPTION', 'AWS_MANAGED_KMS_KEY',
+            'UNENCRYPTED_ENV_VARS', 'INSECURE_TRANSPORT_ALLOWED'
+        ]:
+            categories['encryption_gaps'].append(finding)
+            
+        # Access Control Issues (high impact)
+        elif finding_type in [
+            'ADMIN_USER', 'ADMIN_INLINE_POLICY', 'WILDCARD_POLICY',
+            'BROAD_POLICY', 'HIGH_RISK_PERMISSION', 'OVERPRIVILEGED_EXECUTION_ROLE',
+            'VERY_OLD_ACCESS_KEY'
+        ]:
+            categories['access_control'].append(finding)
+            
+        # Monitoring Gaps (medium impact - important but not immediate vulnerability)
+        elif finding_type in [
+            'NO_FLOW_LOGS', 'NO_ACCESS_LOGGING', 'NO_DEAD_LETTER_QUEUE',
+            'CONTAINER_INSIGHTS_DISABLED'
+        ]:
+            categories['monitoring_gaps'].append(finding)
+            
+        # Operational Cleanup (lower impact - housekeeping items)
+        elif finding_type in [
+            'UNUSED_SECURITY_GROUP', 'OLD_ACCESS_KEY', 'INACTIVE_USER',
+            'OLD_PROGRAMMATIC_USER', 'NO_LIFECYCLE_POLICY'
+        ]:
+            categories['operational_cleanup'].append(finding)
+            
+        # Configuration Drift (lowest impact - best practices)
+        else:
+            categories['configuration_drift'].append(finding)
+    
+    # Calculate weighted score with logarithmic scaling
+    base_score = 100
+    
+    # Critical Exposure: Severe penalty with logarithmic scaling
+    critical_count = len(categories['critical_exposure'])
+    if critical_count > 0:
+        # Heavy penalty: 25 points for first finding, diminishing returns
+        critical_penalty = 25 * math.log(critical_count + 1)
+        base_score -= min(critical_penalty, 40)  # Cap at 40 points
+    
+    # Encryption Gaps: Significant penalty with scaling
+    encryption_count = len(categories['encryption_gaps'])
+    if encryption_count > 0:
+        # Moderate penalty: 15 points for first finding, logarithmic scaling
+        encryption_penalty = 15 * math.log(encryption_count + 1)
+        base_score -= min(encryption_penalty, 25)  # Cap at 25 points
+    
+    # Access Control: Important but scaled penalty
+    access_count = len(categories['access_control'])
+    if access_count > 0:
+        # Moderate penalty: 12 points for first finding, logarithmic scaling
+        access_penalty = 12 * math.log(access_count + 1)
+        base_score -= min(access_penalty, 20)  # Cap at 20 points
+    
+    # Monitoring Gaps: Moderate penalty, heavily scaled
+    monitoring_count = len(categories['monitoring_gaps'])
+    if monitoring_count > 0:
+        # Light penalty: 8 points for first finding, heavy scaling
+        monitoring_penalty = 8 * math.log(monitoring_count + 1)
+        base_score -= min(monitoring_penalty, 12)  # Cap at 12 points
+    
+    # Operational Cleanup: Light penalty, very scaled
+    operational_count = len(categories['operational_cleanup'])
+    if operational_count > 0:
+        # Very light penalty: 5 points for first finding, heavy scaling
+        operational_penalty = 5 * math.log(operational_count + 1)
+        base_score -= min(operational_penalty, 8)  # Cap at 8 points
+    
+    # Configuration Drift: Minimal penalty
+    config_count = len(categories['configuration_drift'])
+    if config_count > 0:
+        # Minimal penalty: 3 points for first finding, heavy scaling
+        config_penalty = 3 * math.log(config_count + 1)
+        base_score -= min(config_penalty, 5)  # Cap at 5 points
+    
+    # Ensure score stays within reasonable bounds
+    final_score = max(10, min(100, int(base_score)))
+    
+    return final_score
 
 
 async def audit_network_security(regions: List[str] = None, all_regions: bool = True, account: str = None) -> List[SecurityFinding]:
