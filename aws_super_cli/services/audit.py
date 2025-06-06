@@ -34,14 +34,19 @@ class SecurityFinding:
         self.remediation = remediation
 
 
-async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) -> List[SecurityFinding]:
+async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True, account: str = None) -> List[SecurityFinding]:
     """Audit S3 buckets for security misconfigurations - Phase 3 comprehensive assessment"""
     findings = []
     
     try:
         # S3 is global, but we'll check from us-east-1
         region = 'us-east-1'
-        session = aioboto3.Session()
+        
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
         
         async with session.client('s3', region_name=region) as s3_client:
             # First, check account-level public access block configuration
@@ -62,7 +67,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                         severity='HIGH',
                         description='Account-level public access block is not fully configured',
                         region=region,
-                        remediation='Enable all account-level public access block settings'
+                        remediation='Enable all account-level public access block settings',
+                        account=account
                     ))
             except Exception:
                 # No account-level public access block configured
@@ -73,7 +79,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                     severity='HIGH',
                     description='Account-level public access block is not configured',
                     region=region,
-                    remediation='Configure account-level public access block settings'
+                    remediation='Configure account-level public access block settings',
+                    account=account
                 ))
             
             # List all buckets
@@ -114,7 +121,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                     severity='MEDIUM',
                                     description='Bucket public access block is not fully configured',
                                     region=bucket_region,
-                                    remediation='Enable all bucket-level public access block settings'
+                                    remediation='Enable all bucket-level public access block settings',
+                                    account=account
                                 ))
                         except Exception:
                             # No bucket-level public access block configured
@@ -125,7 +133,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                 severity='MEDIUM',
                                 description='Bucket public access block is not configured',
                                 region=bucket_region,
-                                remediation='Configure bucket-level public access block settings'
+                                remediation='Configure bucket-level public access block settings',
+                                account=account
                             ))
                         
                         # Check versioning status
@@ -142,7 +151,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                     severity='MEDIUM',
                                     description='Bucket versioning is not enabled - data protection risk',
                                     region=bucket_region,
-                                    remediation='Enable S3 bucket versioning for data protection'
+                                    remediation='Enable S3 bucket versioning for data protection',
+                                    account=account
                                 ))
                             
                             if versioning_status == 'Enabled' and mfa_delete != 'Enabled':
@@ -153,7 +163,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                     severity='LOW',
                                     description='MFA delete is not enabled for versioned bucket',
                                     region=bucket_region,
-                                    remediation='Consider enabling MFA delete for additional protection'
+                                    remediation='Consider enabling MFA delete for additional protection',
+                                    account=account
                                 ))
                         except Exception:
                             continue
@@ -171,7 +182,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                 severity='LOW',
                                 description='No lifecycle policy configured - potential cost optimization missed',
                                 region=bucket_region,
-                                remediation='Configure lifecycle policy to optimize storage costs'
+                                remediation='Configure lifecycle policy to optimize storage costs',
+                                account=account
                             ))
                         
                         # Enhanced encryption analysis
@@ -194,7 +206,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                             severity='LOW',
                                             description='Using S3-managed encryption (AES256) instead of KMS',
                                             region=bucket_region,
-                                            remediation='Consider upgrading to KMS encryption for better key management'
+                                            remediation='Consider upgrading to KMS encryption for better key management',
+                                            account=account
                                         ))
                                     elif sse_algorithm == 'aws:kms':
                                         if not kms_key_id or kms_key_id.startswith('arn:aws:kms'):
@@ -209,7 +222,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                                 severity='LOW',
                                                 description='Using AWS-managed KMS key instead of customer-managed key',
                                                 region=bucket_region,
-                                                remediation='Consider using customer-managed KMS key for better control'
+                                                remediation='Consider using customer-managed KMS key for better control',
+                                                account=account
                                             ))
                         except Exception:
                             # No encryption configured - already handled in original code
@@ -220,7 +234,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                 severity='HIGH',
                                 description='Bucket does not have server-side encryption enabled',
                                 region=bucket_region,
-                                remediation='Enable S3 server-side encryption with KMS'
+                                remediation='Enable S3 server-side encryption with KMS',
+                                account=account
                             ))
                         
                         # Check access logging
@@ -234,7 +249,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                     severity='MEDIUM',
                                     description='Bucket access logging is not enabled',
                                     region=bucket_region,
-                                    remediation='Enable S3 access logging for audit trail'
+                                    remediation='Enable S3 access logging for audit trail',
+                                    account=account
                                 ))
                         except Exception:
                             # No logging configured
@@ -245,7 +261,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                 severity='MEDIUM',
                                 description='Bucket access logging is not enabled',
                                 region=bucket_region,
-                                remediation='Enable S3 access logging for audit trail'
+                                remediation='Enable S3 access logging for audit trail',
+                                account=account
                             ))
                         
                         # Enhanced ACL analysis - existing code
@@ -270,7 +287,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                             severity='HIGH',
                                             description=f'Bucket ACL allows public {permission.lower()} access',
                                             region=bucket_region,
-                                            remediation='Remove public ACL permissions'
+                                            remediation='Remove public ACL permissions',
+                                            account=account
                                         ))
                                     elif permission in ['WRITE', 'WRITE_ACP']:
                                         findings.append(SecurityFinding(
@@ -280,7 +298,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                             severity='HIGH',
                                             description=f'Bucket ACL allows public {permission.lower()} access',
                                             region=bucket_region,
-                                            remediation='Remove public write ACL permissions immediately'
+                                            remediation='Remove public write ACL permissions immediately',
+                                            account=account
                                         ))
                         except Exception:
                             continue
@@ -299,7 +318,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                     severity='HIGH',
                                     description='Bucket policy allows public access via wildcard principal',
                                     region=bucket_region,
-                                    remediation='Review and restrict bucket policy to specific principals'
+                                    remediation='Review and restrict bucket policy to specific principals',
+                                    account=account
                                 ))
                             
                             # Check for unsecured transport
@@ -311,7 +331,8 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
                                     severity='MEDIUM',
                                     description='Bucket policy does not enforce HTTPS/TLS',
                                     region=bucket_region,
-                                    remediation='Add policy condition to deny requests without SecureTransport'
+                                    remediation='Add policy condition to deny requests without SecureTransport',
+                                    account=account
                                 ))
                                 
                         except Exception:
@@ -328,12 +349,16 @@ async def audit_s3_buckets(regions: List[str] = None, all_regions: bool = True) 
     return findings
 
 
-async def audit_iam_users() -> List[SecurityFinding]:
+async def audit_iam_users(account: str = None) -> List[SecurityFinding]:
     """Audit IAM users for security issues"""
     findings = []
     
     try:
-        session = aioboto3.Session()
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
         
         async with session.client('iam', region_name='us-east-1') as iam_client:  # IAM is global
             # List all users
@@ -358,7 +383,8 @@ async def audit_iam_users() -> List[SecurityFinding]:
                                     severity='HIGH',
                                     description='User has administrator access policy attached',
                                     region='global',
-                                    remediation='Use roles instead of users for admin access'
+                                    remediation='Use roles instead of users for admin access',
+                                    account=account
                                 ))
                     except Exception:
                         continue
@@ -378,7 +404,8 @@ async def audit_iam_users() -> List[SecurityFinding]:
                                     severity='HIGH',
                                     description=f'User has inline policy with wildcard permissions: {policy_name}',
                                     region='global',
-                                    remediation='Replace inline policies with managed policies'
+                                    remediation='Replace inline policies with managed policies',
+                                    account=account
                                 ))
                     except Exception:
                         continue
@@ -394,7 +421,8 @@ async def audit_iam_users() -> List[SecurityFinding]:
                                 severity='MEDIUM',
                                 description='User does not have MFA enabled',
                                 region='global',
-                                remediation='Enable MFA for this user account'
+                                remediation='Enable MFA for this user account',
+                                account=account
                             ))
                     except Exception:
                         continue
@@ -428,7 +456,8 @@ async def audit_iam_users() -> List[SecurityFinding]:
                                         severity='MEDIUM',
                                         description=f'Access key is {key_age_days} days old (>90 days)',
                                         region='global',
-                                        remediation='Rotate access keys regularly (every 90 days)'
+                                        remediation='Rotate access keys regularly (every 90 days)',
+                                        account=account
                                     ))
                                 elif key_age_days > 365:
                                     findings.append(SecurityFinding(
@@ -438,7 +467,8 @@ async def audit_iam_users() -> List[SecurityFinding]:
                                         severity='HIGH',
                                         description=f'Access key is {key_age_days} days old (>365 days)',
                                         region='global',
-                                        remediation='Immediately rotate this very old access key'
+                                        remediation='Immediately rotate this very old access key',
+                                        account=account
                                     ))
                     except Exception:
                         continue
@@ -464,7 +494,8 @@ async def audit_iam_users() -> List[SecurityFinding]:
                                     severity='LOW',
                                     description=f'User has not used password in {days_since_password_use} days',
                                     region='global',
-                                    remediation='Review if user account is still needed'
+                                    remediation='Review if user account is still needed',
+                                    account=account
                                 ))
                         
                         # For programmatic users (no password), check if they have old access keys
@@ -491,7 +522,8 @@ async def audit_iam_users() -> List[SecurityFinding]:
                                             severity='LOW',
                                             description=f'Programmatic user created {days_since_creation} days ago - verify still needed',
                                             region='global',
-                                            remediation='Review if programmatic user is still actively used'
+                                            remediation='Review if programmatic user is still actively used',
+                                            account=account
                                         ))
                     except Exception:
                         continue
@@ -502,12 +534,16 @@ async def audit_iam_users() -> List[SecurityFinding]:
     return findings
 
 
-async def audit_iam_policies() -> List[SecurityFinding]:
+async def audit_iam_policies(account: str = None) -> List[SecurityFinding]:
     """Audit IAM policies for overly permissive configurations"""
     findings = []
     
     try:
-        session = aioboto3.Session()
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
         
         async with session.client('iam', region_name='us-east-1') as iam_client:
             # Check customer managed policies
@@ -541,7 +577,8 @@ async def audit_iam_policies() -> List[SecurityFinding]:
                                     severity='HIGH',
                                     description='Policy grants wildcard permissions (*) on all resources (*)',
                                     region='global',
-                                    remediation='Scope policy to specific actions and resources'
+                                    remediation='Scope policy to specific actions and resources',
+                                    account=account
                                 ))
                             else:
                                 findings.append(SecurityFinding(
@@ -551,7 +588,8 @@ async def audit_iam_policies() -> List[SecurityFinding]:
                                     severity='MEDIUM',
                                     description='Policy grants wildcard actions (*) but with scoped resources',
                                     region='global',
-                                    remediation='Limit policy to specific actions needed'
+                                    remediation='Limit policy to specific actions needed',
+                                    account=account
                                 ))
                                 
                         # Check for specific high-risk permissions
@@ -572,7 +610,8 @@ async def audit_iam_policies() -> List[SecurityFinding]:
                                     severity='MEDIUM',
                                     description=f'Policy contains high-risk permission: {risk_action}',
                                     region='global',
-                                    remediation=f'Review necessity of {risk_action} permission'
+                                    remediation=f'Review necessity of {risk_action} permission',
+                                    account=account
                                 ))
                                 
                     except Exception:
@@ -643,34 +682,71 @@ async def run_security_audit(
     
     console = Console()
     
-    with console.status("[bold green]Running security audit...", spinner="dots"):
-        # Run S3 audit if requested
-        if 's3' in services:
-            console.print("[dim]Auditing S3 buckets...[/dim]")
-            s3_findings = await audit_s3_buckets(regions, all_regions)
-            all_findings.extend(s3_findings)
-            
-        # Run IAM audit if requested
-        if 'iam' in services:
-            console.print("[dim]Auditing IAM users...[/dim]")
-            iam_user_findings = await audit_iam_users()
-            all_findings.extend(iam_user_findings)
-            
-            console.print("[dim]Auditing IAM policies...[/dim]")
-            iam_policy_findings = await audit_iam_policies()
-            all_findings.extend(iam_policy_findings)
+    # Determine which profiles to audit
+    if profiles is None:
+        # Single account mode - use current profile
+        profiles_to_audit = [None]  # None means current profile
+        console.print("[dim]Running security audit on current account...[/dim]")
+    else:
+        # Multi-account mode
+        profiles_to_audit = profiles
+        console.print(f"[dim]Running security audit on {len(profiles)} accounts: {', '.join(profiles)}[/dim]")
+    
+    # Audit each profile
+    for profile in profiles_to_audit:
+        profile_display = profile or "current"
         
-        # Run Network security audit if requested
-        if 'network' in services:
-            console.print("[dim]Auditing network security (VPCs, Security Groups, NACLs)...[/dim]")
-            network_findings = await audit_network_security(regions, all_regions)
-            all_findings.extend(network_findings)
+        if len(profiles_to_audit) > 1:
+            console.print(f"[dim]Auditing account: {profile_display}...[/dim]")
         
-        # Run Compute security audit if requested
-        if 'compute' in services:
-            console.print("[dim]Auditing compute security (EC2, Lambda, Containers)...[/dim]")
-            compute_findings = await audit_compute_security(regions, all_regions)
-            all_findings.extend(compute_findings)
+        with console.status(f"[bold green]Running security audit on {profile_display}...", spinner="dots"):
+            # Run S3 audit if requested
+            if 's3' in services:
+                console.print(f"[dim]Auditing S3 buckets in {profile_display}...[/dim]")
+                s3_findings = await audit_s3_buckets(regions, all_regions, profile)
+                # Add profile info to findings
+                for finding in s3_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(s3_findings)
+                
+            # Run IAM audit if requested
+            if 'iam' in services:
+                console.print(f"[dim]Auditing IAM users in {profile_display}...[/dim]")
+                iam_user_findings = await audit_iam_users(profile)
+                # Add profile info to findings
+                for finding in iam_user_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(iam_user_findings)
+                
+                console.print(f"[dim]Auditing IAM policies in {profile_display}...[/dim]")
+                iam_policy_findings = await audit_iam_policies(profile)
+                # Add profile info to findings
+                for finding in iam_policy_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(iam_policy_findings)
+            
+            # Run Network security audit if requested
+            if 'network' in services:
+                console.print(f"[dim]Auditing network security in {profile_display} (VPCs, Security Groups, NACLs)...[/dim]")
+                network_findings = await audit_network_security(regions, all_regions, profile)
+                # Add profile info to findings
+                for finding in network_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(network_findings)
+            
+            # Run Compute security audit if requested
+            if 'compute' in services:
+                console.print(f"[dim]Auditing compute security in {profile_display} (EC2, Lambda, Containers)...[/dim]")
+                compute_findings = await audit_compute_security(regions, all_regions, profile)
+                # Add profile info to findings
+                for finding in compute_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(compute_findings)
     
     return all_findings
 
@@ -713,7 +789,7 @@ def get_security_summary(findings: List[SecurityFinding]) -> Dict[str, Any]:
     }
 
 
-async def audit_network_security(regions: List[str] = None, all_regions: bool = True) -> List[SecurityFinding]:
+async def audit_network_security(regions: List[str] = None, all_regions: bool = True, account: str = None) -> List[SecurityFinding]:
     """Audit network security - VPCs, Security Groups, NACLs, and Subnets"""
     findings = []
     
@@ -728,34 +804,38 @@ async def audit_network_security(regions: List[str] = None, all_regions: bool = 
             regions = ['us-east-1']  # Default region
     
     for region in regions:
-        region_findings = await _audit_network_security_region(region)
+        region_findings = await _audit_network_security_region(region, account)
         findings.extend(region_findings)
     
     return findings
 
 
-async def _audit_network_security_region(region: str) -> List[SecurityFinding]:
+async def _audit_network_security_region(region: str, account: str = None) -> List[SecurityFinding]:
     """Audit network security for a specific region"""
     findings = []
     
     try:
-        session = aioboto3.Session()
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
         
         async with session.client('ec2', region_name=region) as ec2_client:
             # Audit Security Groups
-            sg_findings = await _audit_security_groups(ec2_client, region)
+            sg_findings = await _audit_security_groups(ec2_client, region, account)
             findings.extend(sg_findings)
             
             # Audit Network ACLs
-            nacl_findings = await _audit_network_acls(ec2_client, region)
+            nacl_findings = await _audit_network_acls(ec2_client, region, account)
             findings.extend(nacl_findings)
             
             # Audit VPCs
-            vpc_findings = await _audit_vpcs(ec2_client, region)
+            vpc_findings = await _audit_vpcs(ec2_client, region, account)
             findings.extend(vpc_findings)
             
             # Audit Subnets
-            subnet_findings = await _audit_subnets(ec2_client, region)
+            subnet_findings = await _audit_subnets(ec2_client, region, account)
             findings.extend(subnet_findings)
             
     except Exception as e:
@@ -764,7 +844,7 @@ async def _audit_network_security_region(region: str) -> List[SecurityFinding]:
     return findings
 
 
-async def _audit_security_groups(ec2_client, region: str) -> List[SecurityFinding]:
+async def _audit_security_groups(ec2_client, region: str, account: str = None) -> List[SecurityFinding]:
     """Audit Security Groups for overly permissive rules"""
     findings = []
     
@@ -799,7 +879,8 @@ async def _audit_security_groups(ec2_client, region: str) -> List[SecurityFindin
                                     severity='HIGH',
                                     description='Security group allows SSH (port 22) from anywhere (0.0.0.0/0)',
                                     region=region,
-                                    remediation='Restrict SSH access to specific IP ranges or VPN'
+                                    remediation='Restrict SSH access to specific IP ranges or VPN',
+                                    account=account
                                 ))
                     
                     # Check for RDP access from anywhere
@@ -815,7 +896,8 @@ async def _audit_security_groups(ec2_client, region: str) -> List[SecurityFindin
                                     severity='HIGH',
                                     description='Security group allows RDP (port 3389) from anywhere (0.0.0.0/0)',
                                     region=region,
-                                    remediation='Restrict RDP access to specific IP ranges or VPN'
+                                    remediation='Restrict RDP access to specific IP ranges or VPN',
+                                    account=account
                                 ))
                     
                     # Check for all traffic from anywhere
@@ -829,7 +911,8 @@ async def _audit_security_groups(ec2_client, region: str) -> List[SecurityFindin
                                     severity='HIGH',
                                     description='Security group allows all traffic from anywhere (0.0.0.0/0)',
                                     region=region,
-                                    remediation='Restrict to specific protocols and ports needed'
+                                    remediation='Restrict to specific protocols and ports needed',
+                                    account=account
                                 ))
                     
                     # Check for wide port ranges from anywhere
@@ -845,7 +928,8 @@ async def _audit_security_groups(ec2_client, region: str) -> List[SecurityFindin
                                         severity='MEDIUM',
                                         description=f'Security group allows wide port range ({from_port}-{to_port}) from anywhere',
                                         region=region,
-                                        remediation='Limit to specific ports required for your application'
+                                        remediation='Limit to specific ports required for your application',
+                                        account=account
                                     ))
                 
                 # Check if security group has no inbound rules but allows outbound
@@ -870,7 +954,8 @@ async def _audit_security_groups(ec2_client, region: str) -> List[SecurityFindin
                                 severity='LOW',
                                 description='Security group appears to be unused (no attached instances)',
                                 region=region,
-                                remediation='Consider removing unused security groups to reduce complexity'
+                                remediation='Consider removing unused security groups to reduce complexity',
+                                account=account
                             ))
                     except Exception:
                         pass
@@ -881,7 +966,7 @@ async def _audit_security_groups(ec2_client, region: str) -> List[SecurityFindin
     return findings
 
 
-async def _audit_network_acls(ec2_client, region: str) -> List[SecurityFinding]:
+async def _audit_network_acls(ec2_client, region: str, account: str = None) -> List[SecurityFinding]:
     """Audit Network ACLs for security misconfigurations"""
     findings = []
     
@@ -923,7 +1008,8 @@ async def _audit_network_acls(ec2_client, region: str) -> List[SecurityFinding]:
                             severity='MEDIUM',
                             description='Network ACL allows SSH (port 22) from anywhere',
                             region=region,
-                            remediation='Consider restricting SSH access in Network ACL'
+                            remediation='Consider restricting SSH access in Network ACL',
+                            account=account
                         ))
                     elif from_port == 3389 and to_port == 3389:
                         findings.append(SecurityFinding(
@@ -933,7 +1019,8 @@ async def _audit_network_acls(ec2_client, region: str) -> List[SecurityFinding]:
                             severity='MEDIUM',
                             description='Network ACL allows RDP (port 3389) from anywhere',
                             region=region,
-                            remediation='Consider restricting RDP access in Network ACL'
+                            remediation='Consider restricting RDP access in Network ACL',
+                            account=account
                         ))
             
             # Check if default NACL has been modified
@@ -948,7 +1035,8 @@ async def _audit_network_acls(ec2_client, region: str) -> List[SecurityFinding]:
                         severity='LOW',
                         description='Default Network ACL has been modified from standard configuration',
                         region=region,
-                        remediation='Consider using custom NACLs instead of modifying default NACL'
+                        remediation='Consider using custom NACLs instead of modifying default NACL',
+                        account=account
                     ))
     
     except Exception as e:
@@ -957,7 +1045,7 @@ async def _audit_network_acls(ec2_client, region: str) -> List[SecurityFinding]:
     return findings
 
 
-async def _audit_vpcs(ec2_client, region: str) -> List[SecurityFinding]:
+async def _audit_vpcs(ec2_client, region: str, account: str = None) -> List[SecurityFinding]:
     """Audit VPCs for security configurations"""
     findings = []
     
@@ -992,7 +1080,8 @@ async def _audit_vpcs(ec2_client, region: str) -> List[SecurityFinding]:
                         severity='MEDIUM',
                         description='VPC does not have Flow Logs enabled for network monitoring',
                         region=region,
-                        remediation='Enable VPC Flow Logs to monitor network traffic'
+                        remediation='Enable VPC Flow Logs to monitor network traffic',
+                        account=account
                     ))
             except Exception:
                 pass
@@ -1014,7 +1103,8 @@ async def _audit_vpcs(ec2_client, region: str) -> List[SecurityFinding]:
                         severity='LOW',
                         description='VPC has Internet Gateway attached - ensure proper subnet isolation',
                         region=region,
-                        remediation='Review public/private subnet configuration and routing'
+                        remediation='Review public/private subnet configuration and routing',
+                        account=account
                     ))
             except Exception:
                 pass
@@ -1042,7 +1132,8 @@ async def _audit_vpcs(ec2_client, region: str) -> List[SecurityFinding]:
                                             severity='LOW',
                                             description='VPC uses custom DNS servers instead of Amazon provided',
                                             region=region,
-                                            remediation='Verify custom DNS servers are secure and reliable'
+                                            remediation='Verify custom DNS servers are secure and reliable',
+                                            account=account
                                         ))
                 except Exception:
                     pass
@@ -1053,7 +1144,7 @@ async def _audit_vpcs(ec2_client, region: str) -> List[SecurityFinding]:
     return findings
 
 
-async def _audit_subnets(ec2_client, region: str) -> List[SecurityFinding]:
+async def _audit_subnets(ec2_client, region: str, account: str = None) -> List[SecurityFinding]:
     """Audit Subnets for security configurations"""
     findings = []
     
@@ -1107,7 +1198,8 @@ async def _audit_subnets(ec2_client, region: str) -> List[SecurityFinding]:
                             severity='MEDIUM',
                             description='Public subnet automatically assigns public IP addresses',
                             region=region,
-                            remediation='Consider disabling auto-assign public IP and use explicit allocation'
+                            remediation='Consider disabling auto-assign public IP and use explicit allocation',
+                            account=account
                         ))
                     else:
                         findings.append(SecurityFinding(
@@ -1117,7 +1209,8 @@ async def _audit_subnets(ec2_client, region: str) -> List[SecurityFinding]:
                             severity='HIGH',
                             description='Private subnet configured to auto-assign public IPs',
                             region=region,
-                            remediation='Disable auto-assign public IP for private subnets'
+                            remediation='Disable auto-assign public IP for private subnets',
+                            account=account
                         ))
                         
                 except Exception:
@@ -1129,7 +1222,7 @@ async def _audit_subnets(ec2_client, region: str) -> List[SecurityFinding]:
     return findings
 
 
-async def audit_compute_security(regions: List[str] = None, all_regions: bool = True) -> List[SecurityFinding]:
+async def audit_compute_security(regions: List[str] = None, all_regions: bool = True, account: str = None) -> List[SecurityFinding]:
     """Audit compute security - EC2, Lambda, and Container security"""
     findings = []
     
@@ -1144,32 +1237,36 @@ async def audit_compute_security(regions: List[str] = None, all_regions: bool = 
             regions = ['us-east-1']  # Default region
     
     for region in regions:
-        region_findings = await _audit_compute_security_region(region)
+        region_findings = await _audit_compute_security_region(region, account)
         findings.extend(region_findings)
     
     return findings
 
 
-async def _audit_compute_security_region(region: str) -> List[SecurityFinding]:
+async def _audit_compute_security_region(region: str, account: str = None) -> List[SecurityFinding]:
     """Audit compute security for a specific region"""
     findings = []
     
     try:
-        session = aioboto3.Session()
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
         
         # Audit EC2 instances
         async with session.client('ec2', region_name=region) as ec2_client:
-            ec2_findings = await _audit_ec2_instances(ec2_client, region)
+            ec2_findings = await _audit_ec2_instances(ec2_client, region, account)
             findings.extend(ec2_findings)
         
         # Audit Lambda functions
         async with session.client('lambda', region_name=region) as lambda_client:
-            lambda_findings = await _audit_lambda_functions(lambda_client, region)
+            lambda_findings = await _audit_lambda_functions(lambda_client, region, account)
             findings.extend(lambda_findings)
         
         # Audit ECS clusters and services
         async with session.client('ecs', region_name=region) as ecs_client:
-            ecs_findings = await _audit_ecs_security(ecs_client, region)
+            ecs_findings = await _audit_ecs_security(ecs_client, region, account)
             findings.extend(ecs_findings)
             
     except Exception as e:
@@ -1178,7 +1275,7 @@ async def _audit_compute_security_region(region: str) -> List[SecurityFinding]:
     return findings
 
 
-async def _audit_ec2_instances(ec2_client, region: str) -> List[SecurityFinding]:
+async def _audit_ec2_instances(ec2_client, region: str, account: str = None) -> List[SecurityFinding]:
     """Audit EC2 instances for security misconfigurations"""
     findings = []
     
@@ -1233,7 +1330,8 @@ async def _audit_ec2_instances(ec2_client, region: str) -> List[SecurityFinding]
                                                     severity='HIGH',
                                                     description=f'Public EC2 instance allows {"SSH" if from_port == 22 else "RDP"} from anywhere',
                                                     region=region,
-                                                    remediation='Restrict security group rules or move to private subnet'
+                                                    remediation='Restrict security group rules or move to private subnet',
+                                                    account=account
                                                 ))
                             except Exception:
                                 continue
@@ -1246,7 +1344,8 @@ async def _audit_ec2_instances(ec2_client, region: str) -> List[SecurityFinding]
                             severity='MEDIUM',
                             description='EC2 instance has public IP address - review necessity',
                             region=region,
-                            remediation='Consider using private subnets with NAT Gateway if public access not required'
+                            remediation='Consider using private subnets with NAT Gateway if public access not required',
+                            account=account
                         ))
                     
                     # Check IMDSv2 enforcement
@@ -1261,7 +1360,8 @@ async def _audit_ec2_instances(ec2_client, region: str) -> List[SecurityFinding]
                             severity='MEDIUM',
                             description='EC2 instance does not enforce IMDSv2 (Instance Metadata Service v2)',
                             region=region,
-                            remediation='Enable IMDSv2 enforcement to prevent SSRF attacks'
+                            remediation='Enable IMDSv2 enforcement to prevent SSRF attacks',
+                            account=account
                         ))
                     
                     # Check for instances using default security group
@@ -1274,7 +1374,8 @@ async def _audit_ec2_instances(ec2_client, region: str) -> List[SecurityFinding]
                                 severity='LOW',
                                 description='EC2 instance uses default security group',
                                 region=region,
-                                remediation='Create custom security groups with least privilege access'
+                                remediation='Create custom security groups with least privilege access',
+                                account=account
                             ))
                     
                     # Check for instances without key pairs (if running)
@@ -1286,7 +1387,8 @@ async def _audit_ec2_instances(ec2_client, region: str) -> List[SecurityFinding]
                             severity='LOW',
                             description='Running EC2 instance has no key pair assigned',
                             region=region,
-                            remediation='Assign key pair for secure access or use Systems Manager Session Manager'
+                            remediation='Assign key pair for secure access or use Systems Manager Session Manager',
+                            account=account
                         ))
                     
                     # Check for public AMI usage
@@ -1304,7 +1406,8 @@ async def _audit_ec2_instances(ec2_client, region: str) -> List[SecurityFinding]
                                         severity='LOW',
                                         description=f'EC2 instance uses public AMI: {image_id}',
                                         region=region,
-                                        remediation='Consider using private AMIs or verified public AMIs from trusted sources'
+                                        remediation='Consider using private AMIs or verified public AMIs from trusted sources',
+                                        account=account
                                     ))
                         except Exception:
                             # AMI might not exist anymore or access denied
@@ -1316,7 +1419,7 @@ async def _audit_ec2_instances(ec2_client, region: str) -> List[SecurityFinding]
     return findings
 
 
-async def _audit_lambda_functions(lambda_client, region: str) -> List[SecurityFinding]:
+async def _audit_lambda_functions(lambda_client, region: str, account: str = None) -> List[SecurityFinding]:
     """Audit Lambda functions for security misconfigurations"""
     findings = []
     
@@ -1345,7 +1448,8 @@ async def _audit_lambda_functions(lambda_client, region: str) -> List[SecurityFi
                             severity='HIGH',
                             description='Lambda function allows public access via wildcard principal',
                             region=region,
-                            remediation='Restrict function policy to specific principals'
+                            remediation='Restrict function policy to specific principals',
+                            account=account
                         ))
                         
                 except Exception:
@@ -1362,7 +1466,8 @@ async def _audit_lambda_functions(lambda_client, region: str) -> List[SecurityFi
                         severity='MEDIUM',
                         description='Lambda function environment variables are not encrypted with customer KMS key',
                         region=region,
-                        remediation='Enable KMS encryption for environment variables'
+                        remediation='Enable KMS encryption for environment variables',
+                        account=account
                     ))
                 
                 # Check VPC configuration
@@ -1376,7 +1481,8 @@ async def _audit_lambda_functions(lambda_client, region: str) -> List[SecurityFi
                         severity='LOW',
                         description='Lambda function is not configured to run in VPC',
                         region=region,
-                        remediation='Consider VPC configuration if function needs to access VPC resources securely'
+                        remediation='Consider VPC configuration if function needs to access VPC resources securely',
+                        account=account
                     ))
                 
                 # Check dead letter queue configuration
@@ -1389,7 +1495,8 @@ async def _audit_lambda_functions(lambda_client, region: str) -> List[SecurityFi
                         severity='LOW',
                         description='Lambda function does not have dead letter queue configured',
                         region=region,
-                        remediation='Configure dead letter queue for error handling and monitoring'
+                        remediation='Configure dead letter queue for error handling and monitoring',
+                        account=account
                     ))
                 
                 # Check function execution role permissions
@@ -1408,7 +1515,8 @@ async def _audit_lambda_functions(lambda_client, region: str) -> List[SecurityFi
                             severity='MEDIUM',
                             description=f'Lambda function uses potentially overprivileged execution role: {role_name}',
                             region=region,
-                            remediation='Review and apply least privilege principle to execution role'
+                            remediation='Review and apply least privilege principle to execution role',
+                            account=account
                         ))
                 
                 # Check runtime version
@@ -1428,7 +1536,8 @@ async def _audit_lambda_functions(lambda_client, region: str) -> List[SecurityFi
                             severity='MEDIUM',
                             description=f'Lambda function uses deprecated runtime: {runtime}',
                             region=region,
-                            remediation='Update to a supported runtime version'
+                            remediation='Update to a supported runtime version',
+                            account=account
                         ))
                         
     except Exception as e:
@@ -1437,7 +1546,7 @@ async def _audit_lambda_functions(lambda_client, region: str) -> List[SecurityFi
     return findings
 
 
-async def _audit_ecs_security(ecs_client, region: str) -> List[SecurityFinding]:
+async def _audit_ecs_security(ecs_client, region: str, account: str = None) -> List[SecurityFinding]:
     """Audit ECS clusters and services for security misconfigurations"""
     findings = []
     
@@ -1472,7 +1581,8 @@ async def _audit_ecs_security(ecs_client, region: str) -> List[SecurityFinding]:
                     severity='LOW',
                     description='ECS cluster does not have Container Insights enabled',
                     region=region,
-                    remediation='Enable Container Insights for better monitoring and security visibility'
+                    remediation='Enable Container Insights for better monitoring and security visibility',
+                    account=account
                 ))
             
             # Get services in this cluster
@@ -1510,7 +1620,8 @@ async def _audit_ecs_security(ecs_client, region: str) -> List[SecurityFinding]:
                                             severity='HIGH',
                                             description=f'ECS service uses privileged container: {container.get("name", "unknown")}',
                                             region=region,
-                                            remediation='Remove privileged flag unless absolutely necessary'
+                                            remediation='Remove privileged flag unless absolutely necessary',
+                                            account=account
                                         ))
                                     
                                     # Check for containers running as root
@@ -1522,7 +1633,8 @@ async def _audit_ecs_security(ecs_client, region: str) -> List[SecurityFinding]:
                                             severity='MEDIUM',
                                             description=f'ECS container may be running as root: {container.get("name", "unknown")}',
                                             region=region,
-                                            remediation='Configure container to run as non-root user'
+                                            remediation='Configure container to run as non-root user',
+                                            account=account
                                         ))
                                 
                                 # Check network mode
@@ -1535,7 +1647,8 @@ async def _audit_ecs_security(ecs_client, region: str) -> List[SecurityFinding]:
                                         severity='MEDIUM',
                                         description='ECS task uses host network mode',
                                         region=region,
-                                        remediation='Consider using awsvpc network mode for better isolation'
+                                        remediation='Consider using awsvpc network mode for better isolation',
+                                        account=account
                                     ))
                                     
                             except Exception:
