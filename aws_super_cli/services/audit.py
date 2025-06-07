@@ -1775,3 +1775,328 @@ async def _audit_ecs_security(ecs_client, region: str, account: str = None) -> L
         rprint(f"[red]Error auditing ECS security in region {region}: {e}[/red]")
     
     return findings 
+
+
+def export_findings_csv(findings: List[SecurityFinding], filepath: str, show_account: bool = False) -> None:
+    """Export security findings to CSV format"""
+    import csv
+    from datetime import datetime
+    
+    with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['severity', 'service', 'resource', 'finding_type', 'description', 'region', 'remediation']
+        if show_account:
+            fieldnames.insert(0, 'account')
+        
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        
+        # Write header
+        writer.writeheader()
+        
+        # Sort findings by severity
+        severity_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
+        sorted_findings = sorted(findings, key=lambda x: severity_order.get(x.severity, 3))
+        
+        # Write findings
+        for finding in sorted_findings:
+            row = {
+                'severity': finding.severity,
+                'service': finding.resource_type,
+                'resource': finding.resource_id,
+                'finding_type': finding.finding_type,
+                'description': finding.description,
+                'region': finding.region,
+                'remediation': finding.remediation or ''
+            }
+            
+            if show_account:
+                row['account'] = finding.account or 'current'
+            
+            writer.writerow(row)
+
+
+def export_findings_txt(findings: List[SecurityFinding], filepath: str, show_account: bool = False) -> None:
+    """Export security findings to text format"""
+    from datetime import datetime
+    
+    with open(filepath, 'w', encoding='utf-8') as txtfile:
+        # Header
+        txtfile.write("AWS SUPER CLI - SECURITY AUDIT REPORT\n")
+        txtfile.write("="*50 + "\n")
+        txtfile.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        txtfile.write(f"Total Findings: {len(findings)}\n\n")
+        
+        # Summary statistics
+        high_count = sum(1 for f in findings if f.severity == 'HIGH')
+        medium_count = sum(1 for f in findings if f.severity == 'MEDIUM')
+        low_count = sum(1 for f in findings if f.severity == 'LOW')
+        
+        txtfile.write("SUMMARY\n")
+        txtfile.write("-" * 20 + "\n")
+        txtfile.write(f"High Risk:   {high_count}\n")
+        txtfile.write(f"Medium Risk: {medium_count}\n")
+        txtfile.write(f"Low Risk:    {low_count}\n\n")
+        
+        # Services breakdown
+        services = {}
+        for finding in findings:
+            services[finding.resource_type] = services.get(finding.resource_type, 0) + 1
+        
+        txtfile.write("FINDINGS BY SERVICE\n")
+        txtfile.write("-" * 20 + "\n")
+        for service, count in sorted(services.items()):
+            txtfile.write(f"{service}: {count}\n")
+        txtfile.write("\n")
+        
+        # Detailed findings
+        txtfile.write("DETAILED FINDINGS\n")
+        txtfile.write("=" * 50 + "\n\n")
+        
+        # Sort by severity
+        severity_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
+        sorted_findings = sorted(findings, key=lambda x: severity_order.get(x.severity, 3))
+        
+        for i, finding in enumerate(sorted_findings, 1):
+            txtfile.write(f"Finding #{i}\n")
+            txtfile.write("-" * 15 + "\n")
+            if show_account and finding.account:
+                txtfile.write(f"Account:     {finding.account}\n")
+            txtfile.write(f"Severity:    {finding.severity}\n")
+            txtfile.write(f"Service:     {finding.resource_type}\n")
+            txtfile.write(f"Resource:    {finding.resource_id}\n")
+            txtfile.write(f"Finding:     {finding.finding_type}\n")
+            txtfile.write(f"Description: {finding.description}\n")
+            txtfile.write(f"Region:      {finding.region}\n")
+            if finding.remediation:
+                txtfile.write(f"Remediation: {finding.remediation}\n")
+            txtfile.write("\n")
+
+
+def export_findings_html(findings: List[SecurityFinding], filepath: str, show_account: bool = False) -> None:
+    """Export security findings to HTML format"""
+    from datetime import datetime
+    
+    # Calculate summary stats
+    high_count = sum(1 for f in findings if f.severity == 'HIGH')
+    medium_count = sum(1 for f in findings if f.severity == 'MEDIUM')
+    low_count = sum(1 for f in findings if f.severity == 'LOW')
+    
+    # Services breakdown
+    services = {}
+    for finding in findings:
+        services[finding.resource_type] = services.get(finding.resource_type, 0) + 1
+    
+    # Calculate security score
+    summary = get_security_summary(findings)
+    score = summary['score']
+    
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS Security Audit Report</title>
+    <style>
+        body {{ 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background-color: #f5f5f5; 
+        }}
+        .container {{ 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 30px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
+        }}
+        .header {{ 
+            text-align: center; 
+            border-bottom: 3px solid #2c3e50; 
+            padding-bottom: 20px; 
+            margin-bottom: 30px; 
+        }}
+        .header h1 {{ 
+            color: #2c3e50; 
+            margin: 0; 
+            font-size: 2.5em; 
+        }}
+        .header .subtitle {{ 
+            color: #7f8c8d; 
+            margin: 10px 0; 
+        }}
+        .summary {{ 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
+            gap: 20px; 
+            margin-bottom: 40px; 
+        }}
+        .summary-card {{ 
+            background: #fff; 
+            border: 1px solid #ecf0f1; 
+            border-radius: 8px; 
+            padding: 20px; 
+            text-align: center; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+        }}
+        .summary-card h3 {{ 
+            margin: 0 0 10px 0; 
+            color: #2c3e50; 
+        }}
+        .score {{ 
+            font-size: 3em; 
+            font-weight: bold; 
+            margin: 10px 0; 
+        }}
+        .score.good {{ color: #27ae60; }}
+        .score.warning {{ color: #f39c12; }}
+        .score.critical {{ color: #e74c3c; }}
+        .severity-high {{ color: #e74c3c; font-weight: bold; }}
+        .severity-medium {{ color: #f39c12; font-weight: bold; }}
+        .severity-low {{ color: #27ae60; font-weight: bold; }}
+        .findings-table {{ 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 20px; 
+            background: white; 
+        }}
+        .findings-table th {{ 
+            background: #34495e; 
+            color: white; 
+            padding: 12px; 
+            text-align: left; 
+            border-bottom: 2px solid #2c3e50; 
+        }}
+        .findings-table td {{ 
+            padding: 12px; 
+            border-bottom: 1px solid #ecf0f1; 
+            vertical-align: top; 
+        }}
+        .findings-table tr:hover {{ 
+            background-color: #f8f9fa; 
+        }}
+        .section {{ 
+            margin: 40px 0; 
+        }}
+        .section h2 {{ 
+            color: #2c3e50; 
+            border-bottom: 2px solid #3498db; 
+            padding-bottom: 10px; 
+        }}
+        .service-breakdown {{ 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 15px; 
+        }}
+        .service-item {{ 
+            background: #ecf0f1; 
+            padding: 15px; 
+            border-radius: 5px; 
+            text-align: center; 
+        }}
+        .service-item .service-name {{ 
+            font-weight: bold; 
+            color: #2c3e50; 
+        }}
+        .service-item .service-count {{ 
+            font-size: 1.5em; 
+            color: #3498db; 
+            margin-top: 5px; 
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>AWS Security Audit Report</h1>
+            <div class="subtitle">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+            <div class="subtitle">Total Findings: {len(findings)}</div>
+        </div>
+        
+        <div class="summary">
+            <div class="summary-card">
+                <h3>Security Score</h3>
+                <div class="score {'good' if score >= 70 else 'warning' if score >= 40 else 'critical'}">{score}/100</div>
+            </div>
+            <div class="summary-card">
+                <h3>High Risk</h3>
+                <div class="severity-high" style="font-size: 2em;">{high_count}</div>
+            </div>
+            <div class="summary-card">
+                <h3>Medium Risk</h3>
+                <div class="severity-medium" style="font-size: 2em;">{medium_count}</div>
+            </div>
+            <div class="summary-card">
+                <h3>Low Risk</h3>
+                <div class="severity-low" style="font-size: 2em;">{low_count}</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Findings by Service</h2>
+            <div class="service-breakdown">"""
+    
+    for service, count in sorted(services.items()):
+        html_content += f"""
+                <div class="service-item">
+                    <div class="service-name">{service}</div>
+                    <div class="service-count">{count}</div>
+                </div>"""
+    
+    html_content += f"""
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Detailed Findings</h2>
+            <table class="findings-table">
+                <thead>
+                    <tr>"""
+    
+    if show_account:
+        html_content += "<th>Account</th>"
+    
+    html_content += """
+                        <th>Severity</th>
+                        <th>Service</th>
+                        <th>Resource</th>
+                        <th>Finding</th>
+                        <th>Description</th>
+                        <th>Region</th>
+                        <th>Remediation</th>
+                    </tr>
+                </thead>
+                <tbody>"""
+    
+    # Sort findings by severity
+    severity_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
+    sorted_findings = sorted(findings, key=lambda x: severity_order.get(x.severity, 3))
+    
+    for finding in sorted_findings:
+        severity_class = f"severity-{finding.severity.lower()}"
+        html_content += f"""
+                    <tr>"""
+        
+        if show_account:
+            html_content += f"<td>{finding.account or 'current'}</td>"
+        
+        html_content += f"""
+                        <td class="{severity_class}">{finding.severity}</td>
+                        <td>{finding.resource_type}</td>
+                        <td>{finding.resource_id}</td>
+                        <td>{finding.finding_type}</td>
+                        <td>{finding.description}</td>
+                        <td>{finding.region}</td>
+                        <td>{finding.remediation or '-'}</td>
+                    </tr>"""
+    
+    html_content += """
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>"""
+    
+    with open(filepath, 'w', encoding='utf-8') as htmlfile:
+        htmlfile.write(html_content) 

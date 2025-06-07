@@ -944,6 +944,8 @@ def audit(
     all_accounts: bool = typer.Option(False, "--all-accounts", help="Query all accessible AWS accounts"),
     accounts: Optional[str] = typer.Option(None, "--accounts", help="Comma-separated profiles or pattern (e.g., 'prod-*,staging')"),
     summary_only: bool = typer.Option(False, "--summary", help="Show only summary statistics"),
+    export_format: Optional[str] = typer.Option(None, "--export", help="Export format: csv, txt, html"),
+    output_file: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path (default: auto-generated)"),
 ):
     """Run security audit to identify misconfigurations"""
     
@@ -1048,6 +1050,49 @@ def audit(
         
         # Show detailed findings
         show_account = profiles_to_query is not None and len(profiles_to_query) > 1
+        
+        # Handle export options
+        if export_format:
+            # Validate export format
+            if export_format.lower() not in ['csv', 'txt', 'html']:
+                console.print(f"[red]Error: Unsupported export format '{export_format}'. Supported formats: csv, txt, html[/red]")
+                return
+            
+            # Generate output filename if not provided
+            if not output_file:
+                from datetime import datetime
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                output_file = f"aws_security_audit_{timestamp}.{export_format.lower()}"
+            
+            # Ensure the filename has the correct extension
+            elif not output_file.lower().endswith(f'.{export_format.lower()}'):
+                output_file = f"{output_file}.{export_format.lower()}"
+            
+            # Export the findings
+            try:
+                if export_format.lower() == 'csv':
+                    audit_service.export_findings_csv(findings, output_file, show_account=show_account)
+                elif export_format.lower() == 'txt':
+                    audit_service.export_findings_txt(findings, output_file, show_account=show_account)
+                elif export_format.lower() == 'html':
+                    audit_service.export_findings_html(findings, output_file, show_account=show_account)
+                
+                console.print(f"[green]Audit results exported to: {output_file}[/green]")
+                
+                # Show summary in terminal as well
+                console.print(f"\n[bold]Security Summary[/bold]")
+                console.print(f"Security Score: [{'red' if summary['score'] < 70 else 'yellow' if summary['score'] < 90 else 'green'}]{summary['score']}/100[/]")
+                console.print(f"Found {summary['total']} security findings:")
+                console.print(f"  [red]High Risk: {summary['high']}[/red]")
+                console.print(f"  [yellow]Medium Risk: {summary['medium']}[/yellow]")
+                console.print(f"  [green]Low Risk: {summary['low']}[/green]")
+                
+                return
+                
+            except Exception as export_error:
+                console.print(f"[red]Error exporting results: {export_error}[/red]")
+                # Continue with normal output if export fails
+        
         table = audit_service.create_audit_table(findings, show_account=show_account)
         console.print(table)
         
@@ -1101,6 +1146,9 @@ def help_command():
     rprint("  [cyan]aws-super-cli audit --all-accounts[/cyan]      # Audit all accounts")
     rprint("  [cyan]aws-super-cli audit --services network[/cyan]  # Network security only")
     rprint("  [cyan]aws-super-cli audit --services s3,iam[/cyan]   # S3 and IAM audit only")
+    rprint("  [cyan]aws-super-cli audit --export csv[/cyan]        # Export results to CSV")
+    rprint("  [cyan]aws-super-cli audit --export html[/cyan]       # Export results to HTML")
+    rprint("  [cyan]aws-super-cli audit --export txt -o report.txt[/cyan] # Export to specific file")
     rprint()
     rprint("[bold]ARN Intelligence:[/bold]")
     rprint("  [cyan]aws-super-cli explain arn:aws:iam::123:user/john[/cyan] # Explain an ARN")
