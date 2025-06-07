@@ -6,7 +6,7 @@
 
 AWS Super CLI is a command-line tool for AWS security auditing, resource discovery, and advanced multi-account management. It solves the key problems engineers face:
 
-1. **AWS security misconfigurations**: Comprehensive security auditing across S3, IAM, and network infrastructure
+1. **AWS security misconfigurations**: Comprehensive security auditing across S3, IAM, and network infrastructure with professional export capabilities
 2. **Multi-account complexity**: Smart account categorization, health monitoring, and unified management
 3. **ARN complexity**: Human-readable ARN display with smart truncation and explanation capabilities
 4. **Service-level cost intelligence**: Get detailed cost analysis with credit allocation per service
@@ -17,6 +17,7 @@ Unlike other tools that focus on single concerns, AWS Super CLI provides enterpr
 - **Account Management** - Smart categorization, health monitoring, and nickname management across AWS accounts
 - **ARN Utilities** - Human-readable ARN display with smart truncation and explanation capabilities
 - **Network security auditing** - Detect SSH/RDP open to world, overly permissive security groups
+- **Professional Security Reports** - Export findings to CSV, TXT, and HTML formats for compliance and reporting
 - **Service-level credit usage analysis** - See exactly which AWS services consume promotional credits
 - **Multi-account security posture** - Unified security scoring across AWS organizations
 
@@ -181,6 +182,29 @@ aws-super-cli audit --services s3,iam      # S3 and IAM audit only
 - VPC Flow Logs status verification
 - Subnet public IP auto-assignment analysis
 
+### Security Report Export
+
+AWS Super CLI provides professional export capabilities for security audit results, verified with real AWS infrastructure:
+
+```bash
+aws-super-cli audit --export-csv report.csv              # CSV format for spreadsheet analysis
+aws-super-cli audit --export-txt report.txt              # Text format for documentation
+aws-super-cli audit --export-html report.html            # Professional HTML report for stakeholders
+
+# Multi-account exports with account information
+aws-super-cli audit --all-accounts --export-html compliance-report.html
+```
+
+**Export Features:**
+- **CSV Export**: Structured data for spreadsheet analysis and integration with other tools
+- **TXT Export**: Human-readable text format with comprehensive summary statistics
+- **HTML Export**: Professional, styled reports ready for executive presentation
+- **Multi-account Support**: Account information included when auditing across multiple accounts
+- **Summary Statistics**: Security scores, findings breakdown, and service-level analysis
+- **Remediation Guidance**: Actionable remediation steps for every finding
+
+**Real-World Verified**: Export functionality tested and verified with actual AWS account data, generating professional compliance reports from live infrastructure findings.
+
 ### Example Security Output
 
 ```
@@ -200,7 +224,7 @@ Findings by Service:
 ┏━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Severity ┃ Service ┃ Resource                                ┃ Finding        ┃ Description                                       ┃
 ┡━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ HIGH     │ EC2     │ launch-wizard-4 (sg-0bd7faf2ca62547e9)  │ SSH_OPEN_TO_W… │ Security group allows SSH (port 22) from anywhere │
+│ HIGH     │ EC2     │ web-server-sg (sg-12345678)            │ SSH_OPEN_TO_W… │ Security group allows SSH (port 22) from anywhere │
 │ HIGH     │ S3      │ my-public-bucket                        │ PUBLIC_POLICY  │ Bucket policy allows public access via wildcard    │
 │ MEDIUM   │ VPC     │ vpc-12345678                           │ NO_FLOW_LOGS   │ VPC does not have Flow Logs enabled                │
 └──────────┴─────────┴─────────────────────────────────────────┴────────────────┴───────────────────────────────────────────────────────┘
