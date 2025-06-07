@@ -89,8 +89,11 @@ class TestAuditExport:
                 assert rows[0]['service'] == 'S3'
                 assert rows[0]['resource'] == 'test-bucket-1'
                 
-                assert rows[2]['severity'] == 'HIGH'
-                assert rows[2]['service'] == 'EC2'
+                assert rows[1]['severity'] == 'HIGH'
+                assert rows[1]['service'] == 'EC2'
+                
+                assert rows[2]['severity'] == 'MEDIUM'
+                assert rows[2]['service'] == 'IAM'
                 
                 assert rows[3]['severity'] == 'LOW'
                 

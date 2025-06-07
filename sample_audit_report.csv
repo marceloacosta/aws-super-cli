@@ -1,0 +1,9 @@
+account,severity,service,resource,finding_type,description,region,remediation
+production,HIGH,S3,company-data-bucket,PUBLIC_READ_ACCESS,S3 bucket allows public read access via bucket policy,us-east-1,Remove public read permissions from bucket policy and enable public access block
+production,HIGH,EC2,web-server-sg (sg-12345678),SSH_OPEN_TO_WORLD,Security group allows SSH (port 22) from anywhere (0.0.0.0/0),us-west-2,Restrict SSH access to specific IP ranges or VPN
+production,MEDIUM,IAM,service-account-user,NO_MFA,IAM user does not have MFA enabled,global,Enable MFA for this user account
+production,MEDIUM,Lambda,data-processor,UNENCRYPTED_ENV_VARS,Lambda function environment variables are not encrypted with customer KMS key,us-east-1,Enable KMS encryption for environment variables
+production,MEDIUM,VPC,vpc-87654321,NO_FLOW_LOGS,VPC does not have Flow Logs enabled for network monitoring,us-west-2,Enable VPC Flow Logs to monitor network traffic
+staging,MEDIUM,IAM,old-service:****,OLD_ACCESS_KEY,Access key is 120 days old (>90 days),global,Rotate access keys regularly (every 90 days)
+staging,LOW,S3,legacy-backup-bucket,NO_LIFECYCLE_POLICY,No lifecycle policy configured - potential cost optimization missed,us-east-1,Configure lifecycle policy to optimize storage costs
+staging,LOW,EC2,default (sg-default123),DEFAULT_SECURITY_GROUP,EC2 instance uses default security group,us-west-2,Create custom security groups with least privilege access
