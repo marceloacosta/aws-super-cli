@@ -988,15 +988,13 @@ def accounts_nickname(
         safe_print(f"[red]Error setting nickname: {e}[/red]")
 
 
-@app.command(name="accounts-dashboard", help="Show comprehensive account dashboard")
+@app.command(name="accounts-dashboard", help="Show comprehensive account dashboard with enhanced intelligence")
 def accounts_dashboard():
-    """Show comprehensive multi-account dashboard"""
-    safe_print("[bold cyan]AWS Multi-Account Dashboard[/bold cyan]")
+    """Show comprehensive account dashboard with enhanced intelligence"""
+    safe_print("[bold cyan]AWS Account Dashboard[/bold cyan]")
     safe_print()
     
     try:
-        safe_print("[dim]Loading account intelligence...[/dim]")
-        
         async def get_dashboard_data():
             return await account_intelligence.get_enhanced_accounts(include_health_check=True)
         
@@ -1006,80 +1004,195 @@ def accounts_dashboard():
             safe_print("[yellow]No accounts found[/yellow]")
             return
         
-        # Overall statistics
-        total = len(accounts)
-        healthy = len([acc for acc in accounts if acc.health.value == 'healthy'])
+        # Group by category for dashboard view
+        categorized = account_intelligence.get_accounts_by_category(accounts)
         
-        safe_print(f"[bold]Account Overview[/bold]")
-        safe_print(f"Total Accounts: {total}")
-        safe_print(f"Health Score: [{'green' if healthy/total > 0.8 else 'yellow' if healthy/total > 0.5 else 'red'}]{healthy}/{total} ({healthy/total*100:.1f}%)[/]")
+        # Summary statistics
+        total_accounts = len(accounts)
+        healthy_accounts = len([acc for acc in accounts if acc.health.value == 'healthy'])
+        
+        safe_print(f"[bold]Total Accounts:[/bold] {total_accounts}")
+        safe_print(f"[bold]Healthy Accounts:[/bold] [green]{healthy_accounts}[/green] / {total_accounts}")
         safe_print()
         
         # Category breakdown
-        categorized = account_intelligence.get_accounts_by_category(accounts)
-        
-        safe_print("[bold]Account Categories[/bold]")
-        category_table = Table(show_header=True, header_style="bold magenta")
-        category_table.add_column("Category", style="cyan", min_width=15)
-        category_table.add_column("Count", style="green", min_width=8)
-        category_table.add_column("Health", style="yellow", min_width=12)
-        category_table.add_column("Accounts", min_width=30)
-        
-        for category, cat_accounts in categorized.items():
-            healthy_count = len([acc for acc in cat_accounts if acc.health.value == 'healthy'])
-            account_names = ', '.join([acc.name for acc in cat_accounts[:3]])
-            if len(cat_accounts) > 3:
-                account_names += f" (+{len(cat_accounts)-3} more)"
+        safe_print("[bold]Account Categories:[/bold]")
+        for category, category_accounts in categorized.items():
+            category_healthy = len([acc for acc in category_accounts if acc.health.value == 'healthy'])
             
-            health_display = f"{healthy_count}/{len(cat_accounts)}"
-            if healthy_count == len(cat_accounts):
-                health_display = f"[green]{health_display}[/green]"
-            elif healthy_count == 0:
-                health_display = f"[red]{health_display}[/red]"
-            else:
-                health_display = f"[yellow]{health_display}[/yellow]"
-            
-            category_display = category.value
             if category == AccountCategory.PRODUCTION:
-                category_display = f"[red bold]{category_display}[/red bold]"
+                safe_print(f"  [red bold]{category.value.title()}:[/red bold] {len(category_accounts)} accounts ({category_healthy} healthy)")
             elif category == AccountCategory.STAGING:
-                category_display = f"[yellow]{category_display}[/yellow]"
+                safe_print(f"  [yellow]{category.value.title()}:[/yellow] {len(category_accounts)} accounts ({category_healthy} healthy)")
             elif category == AccountCategory.DEVELOPMENT:
-                category_display = f"[green]{category_display}[/green]"
-            
-            category_table.add_row(
-                category_display,
-                str(len(cat_accounts)),
-                health_display,
-                account_names
-            )
-        
-        safe_print(category_table)
-        
-        # Quick actions
-        safe_print(f"\n[bold]Quick Actions[/bold]")
-        safe_print(f"  [cyan]aws-super-cli accounts --category production[/cyan]      # Focus on production")
-        safe_print(f"  [cyan]aws-super-cli audit --all-accounts --summary[/cyan]     # Security overview")
-        safe_print(f"  [cyan]aws-super-cli cost by-account[/cyan]                    # Cost breakdown")
-        safe_print(f"  [cyan]aws-super-cli accounts-health[/cyan]                    # Detailed health report")
-        
-        # Warnings and recommendations
-        unhealthy = [acc for acc in accounts if acc.health.value in ['warning', 'error']]
-        if unhealthy:
-            safe_print(f"\n[yellow]{len(unhealthy)} accounts need attention[/yellow]")
-            safe_print(f"Run [cyan]aws-super-cli accounts-health[/cyan] for details")
-        
-        # Production account highlighting
-        prod_accounts = categorized.get(AccountCategory.PRODUCTION, [])
-        if prod_accounts:
-            unhealthy_prod = [acc for acc in prod_accounts if acc.health.value in ['warning', 'error']]
-            if unhealthy_prod:
-                safe_print(f"\n[red bold]CRITICAL: {len(unhealthy_prod)} production accounts have health issues![/red bold]")
+                safe_print(f"  [green]{category.value.title()}:[/green] {len(category_accounts)} accounts ({category_healthy} healthy)")
             else:
-                safe_print(f"\n[green]All {len(prod_accounts)} production accounts are healthy[/green]")
+                safe_print(f"  {category.value.title()}: {len(category_accounts)} accounts ({category_healthy} healthy)")
+        
+        safe_print()
+        
+        # Show detailed table
+        table = account_intelligence.create_enhanced_accounts_table(accounts)
+        safe_print(table)
         
     except Exception as e:
         safe_print(f"[red]Error generating dashboard: {e}[/red]")
+
+
+@app.command(name="accounts-organizations", help="AWS Organizations integration for large-scale account discovery")
+def accounts_organizations(
+    profile: Optional[str] = typer.Option(None, "--profile", help="AWS profile to use for Organizations API access"),
+    show_ous: bool = typer.Option(False, "--show-ous", help="Show organizational unit structure"),
+    export_csv: Optional[str] = typer.Option(None, "--export-csv", help="Export accounts to CSV file"),
+    health_check: bool = typer.Option(False, "--health-check", help="Perform health checks (slower for large organizations)")
+):
+    """Discover and manage accounts via AWS Organizations API
+    
+    This command provides large-scale account discovery for organizations with hundreds of AWS accounts.
+    It uses the AWS Organizations API to discover all accounts and their organizational structure.
+    
+    Requirements:
+    - Access to AWS Organizations API (management account or delegated admin)
+    - organizations:ListAccounts permission
+    - organizations:ListOrganizationalUnitsForParent permission (for OU structure)
+    """
+    safe_print("[bold cyan]AWS Organizations Account Discovery[/bold cyan]")
+    safe_print()
+    
+    try:
+        safe_print("[dim]Discovering organization structure and accounts...[/dim]")
+        
+        async def discover_org_accounts():
+            # Try to discover via Organizations API
+            org_accounts, ous = await account_intelligence.discover_organization_accounts(profile)
+            
+            if not org_accounts:
+                safe_print("[yellow]No AWS Organizations found or insufficient permissions[/yellow]")
+                safe_print("\n[dim]Requirements:[/dim]")
+                safe_print("  • Access to AWS Organizations management account")
+                safe_print("  • organizations:ListAccounts permission")
+                safe_print("  • organizations:ListOrganizationalUnitsForParent permission")
+                safe_print("\n[dim]Alternative: Use 'aws-super-cli accounts' for profile-based discovery[/dim]")
+                return [], []
+            
+            return org_accounts, ous
+        
+        org_accounts, ous = asyncio.run(discover_org_accounts())
+        
+        if not org_accounts:
+            return
+        
+        safe_print(f"[green]Found {len(org_accounts)} accounts in organization[/green]")
+        if ous:
+            safe_print(f"[green]Found {len(ous)} organizational units[/green]")
+        safe_print()
+        
+        # Show OU structure if requested
+        if show_ous and ous:
+            safe_print("[bold]Organizational Unit Structure:[/bold]")
+            
+            # Group OUs by parent for hierarchical display
+            root_ous = [ou for ou in ous if not ou.parent_id or ou.parent_id.startswith('r-')]
+            
+            def display_ou_tree(parent_ous, indent=0):
+                for ou in sorted(parent_ous, key=lambda x: x.name):
+                    prefix = "  " * indent + "├─ " if indent > 0 else ""
+                    safe_print(f"{prefix}[blue]{ou.name}[/blue] ({ou.id})")
+                    
+                    # Find child OUs
+                    child_ous = [child_ou for child_ou in ous if child_ou.parent_id == ou.id]
+                    if child_ous:
+                        display_ou_tree(child_ous, indent + 1)
+            
+            display_ou_tree(root_ous)
+            safe_print()
+        
+        # Get enhanced account profiles with Organizations data
+        async def get_enhanced_org_accounts():
+            return await account_intelligence.get_enhanced_accounts(
+                include_health_check=health_check,
+                include_organizations=True
+            )
+        
+        enhanced_accounts = asyncio.run(get_enhanced_org_accounts())
+        
+        # Filter to only show accounts that were discovered via Organizations
+        org_enhanced_accounts = [acc for acc in enhanced_accounts if acc.organization_account]
+        
+        if not org_enhanced_accounts:
+            safe_print("[yellow]No enhanced account data available[/yellow]")
+            return
+        
+        # Display accounts table
+        table = account_intelligence.create_enhanced_accounts_table(org_enhanced_accounts)
+        safe_print(table)
+        
+        # Summary statistics
+        total_accounts = len(org_enhanced_accounts)
+        active_accounts = len([acc for acc in org_enhanced_accounts if acc.status == 'active'])
+        
+        # Group by category
+        categorized = account_intelligence.get_accounts_by_category(org_enhanced_accounts)
+        
+        safe_print("\n[bold]Organization Summary[/bold]")
+        safe_print(f"Total Accounts: {total_accounts}")
+        safe_print(f"Active Accounts: [green]{active_accounts}[/green] / {total_accounts}")
+        
+        if health_check:
+            healthy_accounts = len([acc for acc in org_enhanced_accounts if acc.health.value == 'healthy'])
+            safe_print(f"Healthy Accounts: [green]{healthy_accounts}[/green] / {total_accounts}")
+        
+        if len(categorized) > 1:
+            safe_print("\n[bold]Categories:[/bold]")
+            for cat, accounts in categorized.items():
+                if cat == AccountCategory.PRODUCTION:
+                    safe_print(f"  [red bold]{cat.value}[/red bold]: {len(accounts)} accounts")
+                elif cat == AccountCategory.STAGING:
+                    safe_print(f"  [yellow]{cat.value}[/yellow]: {len(accounts)} accounts")
+                elif cat == AccountCategory.DEVELOPMENT:
+                    safe_print(f"  [green]{cat.value}[/green]: {len(accounts)} accounts")
+                else:
+                    safe_print(f"  {cat.value}: {len(accounts)} accounts")
+        
+        # Export to CSV if requested
+        if export_csv:
+            try:
+                import csv
+                with open(export_csv, 'w', newline='') as csvfile:
+                    fieldnames = ['account_id', 'name', 'email', 'category', 'status', 'organizational_units', 'health']
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    
+                    writer.writeheader()
+                    for account in org_enhanced_accounts:
+                        ou_names = ', '.join([ou.name for ou in account.organizational_units]) if account.organizational_units else 'Root'
+                        writer.writerow({
+                            'account_id': account.account_id,
+                            'name': account.name,
+                            'email': account.organization_account.email if account.organization_account else '',
+                            'category': account.category.value,
+                            'status': account.status,
+                            'organizational_units': ou_names,
+                            'health': account.health.value
+                        })
+                
+                safe_print(f"\n[green]Exported {len(org_enhanced_accounts)} accounts to {export_csv}[/green]")
+            except Exception as e:
+                safe_print(f"\n[red]Error exporting to CSV: {e}[/red]")
+        
+        # Usage examples
+        safe_print("\n[bold]Large-Scale Operations:[/bold]")
+        safe_print("  [cyan]aws-super-cli accounts-organizations --show-ous[/cyan]           # Show OU structure")
+        safe_print("  [cyan]aws-super-cli accounts-organizations --health-check[/cyan]       # Include health checks")
+        safe_print("  [cyan]aws-super-cli accounts-organizations --export-csv org.csv[/cyan] # Export to CSV")
+        safe_print("  [cyan]aws-super-cli audit --all-accounts[/cyan]                       # Security audit across organization")
+        
+    except Exception as e:
+        safe_print(f"[red]Error discovering organization accounts: {e}[/red]")
+        help_messages = aws_session.get_credential_help(e)
+        if help_messages:
+            safe_print("")
+            for message in help_messages:
+                safe_print(message)
 
 
 @app.command()

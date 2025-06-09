@@ -38,6 +38,32 @@ class AccountHealth(Enum):
 
 
 @dataclass
+class OrganizationalUnit:
+    """AWS Organizations OU information"""
+    id: str
+    name: str
+    arn: str
+    parent_id: str = None
+
+
+@dataclass
+class OrganizationAccount:
+    """AWS Organizations account information"""
+    id: str
+    name: str
+    email: str
+    status: str = "ACTIVE"
+    joined_method: str = "INVITED"
+    joined_timestamp: Optional[datetime] = None
+    arn: str = ""
+    organizational_units: List[str] = None  # List of OU IDs
+    
+    def __post_init__(self):
+        if self.organizational_units is None:
+            self.organizational_units = []
+
+
+@dataclass
 class AccountProfile:
     """Enhanced account profile with intelligence"""
     name: str
@@ -54,20 +80,26 @@ class AccountProfile:
     resource_count: int = 0
     security_score: int = 0
     tags: Dict[str, str] = None
+    # Organizations integration
+    organization_account: Optional[OrganizationAccount] = None
+    organizational_units: List[OrganizationalUnit] = None
     
     def __post_init__(self):
         if self.tags is None:
             self.tags = {}
+        if self.organizational_units is None:
+            self.organizational_units = []
 
 
 class AccountIntelligence:
-    """Smart account management and categorization"""
+    """Smart account management and categorization with AWS Organizations support"""
     
     def __init__(self):
         self.console = Console()
         self.cache_file = Path.home() / '.aws-super-cli' / 'account_cache.json'
         self.cache_file.parent.mkdir(exist_ok=True)
         self._accounts_cache = None
+        self._organizations_cache = None
         
         # Categorization patterns
         self.category_patterns = {
@@ -96,6 +128,144 @@ class AccountIntelligence:
                 r'log', r'logging', r'logs', r'monitoring', r'observability'
             ]
         }
+        
+        # OU-based categorization patterns
+        self.ou_category_patterns = {
+            AccountCategory.PRODUCTION: [
+                r'prod', r'production', r'live', r'workloads-prod'
+            ],
+            AccountCategory.STAGING: [
+                r'stag', r'staging', r'pre-prod', r'preprod', r'workloads-staging'
+            ],
+            AccountCategory.DEVELOPMENT: [
+                r'dev', r'development', r'workloads-dev', r'workloads-test'
+            ],
+            AccountCategory.SANDBOX: [
+                r'sandbox', r'playground', r'workloads-sandbox'
+            ],
+            AccountCategory.SECURITY: [
+                r'security', r'compliance', r'audit', r'governance'
+            ],
+            AccountCategory.SHARED_SERVICES: [
+                r'shared', r'core', r'platform', r'central', r'foundational'
+            ],
+            AccountCategory.BACKUP: [
+                r'backup', r'disaster-recovery', r'dr'
+            ],
+            AccountCategory.LOGGING: [
+                r'logging', r'log-archive', r'monitoring'
+            ]
+        }
+    
+    async def discover_organization_accounts(self, profile_name: str = None) -> Tuple[List[OrganizationAccount], List[OrganizationalUnit]]:
+        """Discover accounts and OUs via AWS Organizations API"""
+        try:
+            session_kwargs = {} if not profile_name or profile_name == 'default' else {'profile_name': profile_name}
+            session = aioboto3.Session(**session_kwargs)
+            
+            accounts = []
+            organizational_units = []
+            
+            async with session.client('organizations', region_name='us-east-1') as org_client:
+                # Check if this is an Organizations management account
+                try:
+                    org_info = await org_client.describe_organization()
+                    management_account_id = org_info['Organization']['MasterAccountId']
+                except ClientError as e:
+                    if e.response['Error']['Code'] == 'AWSOrganizationsNotInUseException':
+                        # Not using Organizations
+                        return [], []
+                    raise
+                
+                # List all accounts in the organization
+                paginator = org_client.get_paginator('list_accounts')
+                async for page in paginator.paginate():
+                    for account_data in page['Accounts']:
+                        org_account = OrganizationAccount(
+                            id=account_data['Id'],
+                            name=account_data['Name'],
+                            email=account_data['Email'],
+                            status=account_data['Status'],
+                            joined_method=account_data['JoinedMethod'],
+                            joined_timestamp=account_data.get('JoinedTimestamp'),
+                            arn=account_data['Arn']
+                        )
+                        accounts.append(org_account)
+                
+                # List all organizational units
+                try:
+                    root_id = None
+                    roots = await org_client.list_roots()
+                    if roots['Roots']:
+                        root_id = roots['Roots'][0]['Id']
+                    
+                    if root_id:
+                        # Get all OUs recursively
+                        async def get_ous_recursive(parent_id: str):
+                            try:
+                                ou_paginator = org_client.get_paginator('list_organizational_units_for_parent')
+                                async for ou_page in ou_paginator.paginate(ParentId=parent_id):
+                                    for ou_data in ou_page['OrganizationalUnits']:
+                                        ou = OrganizationalUnit(
+                                            id=ou_data['Id'],
+                                            name=ou_data['Name'],
+                                            arn=ou_data['Arn'],
+                                            parent_id=parent_id
+                                        )
+                                        organizational_units.append(ou)
+                                        
+                                        # Recursively get child OUs
+                                        await get_ous_recursive(ou.id)
+                            except ClientError:
+                                pass  # Skip if access denied
+                        
+                        await get_ous_recursive(root_id)
+                    
+                    # Map accounts to their OUs
+                    for account in accounts:
+                        try:
+                            parents = await org_client.list_parents_for_account(ChildId=account.id)
+                            account.organizational_units = [parent['Id'] for parent in parents['Parents']]
+                        except ClientError:
+                            pass  # Skip if access denied
+                            
+                except ClientError:
+                    pass  # Skip OU discovery if access denied
+                
+                # Cache the results
+                self._organizations_cache = {
+                    'accounts': accounts,
+                    'organizational_units': organizational_units,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                
+                return accounts, organizational_units
+                
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code in ['AccessDeniedException', 'AWSOrganizationsNotInUseException']:
+                # No access to Organizations or not using it
+                return [], []
+            raise
+        except Exception as e:
+            # Log error but don't fail the whole operation
+            self.console.print(f"[yellow]Warning: Organizations discovery failed: {str(e)[:100]}[/yellow]")
+            return [], []
+    
+    def categorize_account_with_ou(self, account_name: str, ous: List[OrganizationalUnit], account_id: str = None) -> AccountCategory:
+        """Enhanced categorization using organizational unit structure"""
+        
+        # First, try OU-based categorization
+        if ous:
+            ou_text = " ".join([ou.name.lower() for ou in ous])
+            
+            for category, patterns in self.ou_category_patterns.items():
+                for pattern in patterns:
+                    if re.search(pattern, ou_text):
+                        return category
+        
+        # Fall back to traditional account name categorization
+        return self.categorize_account(account_name, account_id)
     
     def categorize_account(self, profile_name: str, account_id: str = None, description: str = "") -> AccountCategory:
         """Intelligently categorize an AWS account"""
@@ -319,66 +489,162 @@ class AccountIntelligence:
         except Exception as e:
             self.console.print(f"[yellow]Warning: Could not save nickname: {e}[/yellow]")
     
-    async def get_enhanced_accounts(self, include_health_check: bool = True) -> List[AccountProfile]:
-        """Get enhanced account profiles with intelligence"""
+    async def get_enhanced_accounts(self, include_health_check: bool = True, include_organizations: bool = True) -> List[AccountProfile]:
+        """Get enhanced account profiles with intelligence and Organizations integration"""
         from ..aws import aws_session
         
-        # Get basic account info
+        # Get basic account info from profiles
         profiles = aws_session.multi_account.discover_profiles()
         accounts = await aws_session.multi_account.discover_accounts()
+        
+        # Try to discover Organizations accounts for large-scale management
+        org_accounts = []
+        all_ous = []
+        
+        if include_organizations:
+            try:
+                # Try each profile to see if it's an Organizations management account
+                for profile in profiles:
+                    try:
+                        discovered_org_accounts, discovered_ous = await self.discover_organization_accounts(profile['name'])
+                        if discovered_org_accounts:
+                            org_accounts = discovered_org_accounts
+                            all_ous = discovered_ous
+                            # Use the first successful discovery
+                            break
+                    except Exception:
+                        continue  # Try next profile
+            except Exception:
+                pass  # Fall back to profile-based discovery
         
         # Load cached nicknames
         nicknames = self.load_nicknames()
         
         enhanced_accounts = []
         
-        for account in accounts:
-            profile_name = account['profile']
-            account_id = account['account_id']
-            
-            # Categorize account
-            category = self.categorize_account(
-                profile_name, 
-                account_id, 
-                account.get('description', '')
-            )
-            
-            # Health check (optional for performance)
-            if include_health_check:
-                health, health_issues = await self.check_account_health(profile_name)
-            else:
+        # Create mapping of account IDs to OU information
+        account_id_to_ous = {}
+        if all_ous:
+            for org_account in org_accounts:
+                account_ous = []
+                for ou_id in org_account.organizational_units:
+                    matching_ou = next((ou for ou in all_ous if ou.id == ou_id), None)
+                    if matching_ou:
+                        account_ous.append(matching_ou)
+                account_id_to_ous[org_account.id] = account_ous
+        
+        # If we found Organizations accounts, prioritize them for comprehensive coverage
+        if org_accounts:
+            for org_account in org_accounts:
+                # Try to find matching profile
+                matching_profile = None
+                for account in accounts:
+                    if account['account_id'] == org_account.id:
+                        matching_profile = account
+                        break
+                
+                # Get OU information for enhanced categorization
+                account_ous = account_id_to_ous.get(org_account.id, [])
+                
+                # Enhanced categorization using OU structure
+                category = self.categorize_account_with_ou(
+                    org_account.name,
+                    account_ous,
+                    org_account.id
+                )
+                
+                # Health check (only if we have profile access)
                 health = AccountHealth.UNKNOWN
-            
-            # Enhanced profile
-            profile = AccountProfile(
-                name=profile_name,
-                account_id=account_id,
-                type=account.get('type', 'unknown'),
-                region=account.get('region', 'us-east-1'),
-                status='active' if profile_name in [acc['profile'] for acc in accounts] else 'inactive',
-                category=category,
-                health=health,
-                nickname=nicknames.get(profile_name),
-                description=account.get('description', f"Profile: {profile_name}"),
-                tags={'environment': category.value}
-            )
-            
-            enhanced_accounts.append(profile)
+                if matching_profile and include_health_check:
+                    health, health_issues = await self.check_account_health(matching_profile['profile'])
+                
+                # Determine profile type
+                profile_type = 'organizations'
+                if matching_profile:
+                    profile_type = matching_profile.get('type', 'unknown')
+                
+                # Enhanced profile with Organizations data
+                profile = AccountProfile(
+                    name=matching_profile['profile'] if matching_profile else org_account.name,
+                    account_id=org_account.id,
+                    type=profile_type,
+                    region='us-east-1',
+                    status=org_account.status.lower(),
+                    category=category,
+                    health=health,
+                    nickname=nicknames.get(matching_profile['profile'] if matching_profile else org_account.name),
+                    description=f"Org: {org_account.name} ({org_account.email})" + (f" | OUs: {', '.join([ou.name for ou in account_ous])}" if account_ous else ""),
+                    tags={'environment': category.value, 'organization': 'true'},
+                    organization_account=org_account,
+                    organizational_units=account_ous
+                )
+                
+                enhanced_accounts.append(profile)
+        else:
+            # Fall back to profile-based discovery for smaller setups
+            for account in accounts:
+                profile_name = account['profile']
+                account_id = account['account_id']
+                
+                # Traditional categorization
+                category = self.categorize_account(
+                    profile_name, 
+                    account_id, 
+                    account.get('description', '')
+                )
+                
+                # Health check (optional for performance)
+                if include_health_check:
+                    health, health_issues = await self.check_account_health(profile_name)
+                else:
+                    health = AccountHealth.UNKNOWN
+                
+                # Enhanced profile
+                profile = AccountProfile(
+                    name=profile_name,
+                    account_id=account_id,
+                    type=account.get('type', 'unknown'),
+                    region=account.get('region', 'us-east-1'),
+                    status='active' if profile_name in [acc['profile'] for acc in accounts] else 'inactive',
+                    category=category,
+                    health=health,
+                    nickname=nicknames.get(profile_name),
+                    description=account.get('description', f"Profile: {profile_name}"),
+                    tags={'environment': category.value}
+                )
+                
+                enhanced_accounts.append(profile)
         
         return enhanced_accounts
     
     def create_enhanced_accounts_table(self, accounts: List[AccountProfile]) -> Table:
-        """Create enhanced accounts table with intelligence"""
-        table = Table(title="AWS Accounts & Profiles", show_header=True, header_style="bold magenta")
+        """Create enhanced accounts table with intelligence and Organizations support"""
+        
+        # Check if we have Organizations data to display
+        has_organizations = any(acc.organization_account for acc in accounts)
+        
+        table_title = "AWS Accounts & Profiles"
+        if has_organizations:
+            table_title = "AWS Organization Accounts"
+        
+        table = Table(title=table_title, show_header=True, header_style="bold magenta")
         
         # Dynamic columns based on available data
         table.add_column("Name", style="cyan", min_width=15)
-        table.add_column("Nickname", style="blue", min_width=12)
-        table.add_column("Category", style="green", min_width=12)
         table.add_column("Account ID", style="yellow", min_width=14)
+        table.add_column("Category", style="green", min_width=12)
+        
+        if has_organizations:
+            table.add_column("Organization Units", style="blue", min_width=20)
+            table.add_column("Email", style="cyan", min_width=25)
+        else:
+            table.add_column("Nickname", style="blue", min_width=12)
+        
         table.add_column("Health", style="white", min_width=8)
         table.add_column("Type", style="magenta", min_width=10)
-        table.add_column("Description", min_width=25)
+        
+        if not has_organizations:
+            table.add_column("Description", min_width=25)
         
         # Sort accounts: production first, then by category, then by name
         def sort_key(acc):
@@ -420,15 +686,35 @@ class AccountIntelligence:
             elif account.category == AccountCategory.SECURITY:
                 category_display = f"[blue]{category_display}[/blue]"
             
-            table.add_row(
-                account.name,
-                account.nickname or "[dim]—[/dim]",
-                category_display,
-                account.account_id,
-                health_display,
-                account.type.title(),
-                account.description
-            )
+            if has_organizations:
+                # Organizations view with OU information
+                ou_names = []
+                if account.organizational_units:
+                    ou_names = [ou.name for ou in account.organizational_units]
+                ou_display = ", ".join(ou_names) if ou_names else "[dim]Root[/dim]"
+                
+                email = account.organization_account.email if account.organization_account else "[dim]—[/dim]"
+                
+                table.add_row(
+                    account.name,
+                    account.account_id,
+                    category_display,
+                    ou_display,
+                    email,
+                    health_display,
+                    account.type.title()
+                )
+            else:
+                # Traditional profile view
+                table.add_row(
+                    account.name,
+                    account.account_id,
+                    category_display,
+                    account.nickname or "[dim]—[/dim]",
+                    health_display,
+                    account.type.title(),
+                    account.description
+                )
         
         return table
     

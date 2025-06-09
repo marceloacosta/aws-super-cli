@@ -65,7 +65,15 @@ aws-super-cli accounts-nickname myprofile "Production Environment"  # Set nickna
 **Smart Categorization:**
 - Automatic environment detection (production, staging, development, security, etc.)
 - Pattern-based recognition from account names and descriptions
+- Enhanced OU-based categorization for Organizations
 - Manual category override capabilities
+
+**AWS Organizations Integration:**
+- Large-scale account discovery via Organizations API
+- Organizational unit (OU) structure visualization
+- Enhanced categorization based on OU hierarchy
+- CSV export for hundreds of accounts
+- Efficient handling of enterprise-scale Organizations
 
 **Health Monitoring:**
 - Real-time health checks across AWS services (EC2, IAM, S3)
@@ -76,6 +84,7 @@ aws-super-cli accounts-nickname myprofile "Production Environment"  # Set nickna
 - Account nicknames for better identification
 - Category-based filtering and grouping
 - Rich table display with comprehensive account information
+- OU-aware account organization for large enterprises
 
 ### Example Account Output
 
@@ -360,6 +369,12 @@ aws-super-cli accounts                     # List with smart categorization
 aws-super-cli accounts --category production  # Focus on production accounts
 aws-super-cli accounts-nickname prod "Production Environment"  # Set friendly names
 aws-super-cli accounts-dashboard           # Comprehensive account overview
+
+# AWS Organizations integration (large-scale)
+aws-super-cli accounts-organizations       # Discover all organization accounts
+aws-super-cli accounts-organizations --show-ous  # Show OU structure
+aws-super-cli accounts-organizations --export-csv org.csv  # Export to CSV
+aws-super-cli accounts-organizations --health-check  # Include health checks
 
 # Account health monitoring
 aws-super-cli accounts-health              # Detailed health assessment
