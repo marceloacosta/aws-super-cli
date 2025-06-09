@@ -1203,7 +1203,7 @@ def audit(
     all_accounts: bool = typer.Option(False, "--all-accounts", help="Query all accessible AWS accounts"),
     accounts: Optional[str] = typer.Option(None, "--accounts", help="Comma-separated profiles or pattern (e.g., 'prod-*,staging')"),
     summary_only: bool = typer.Option(False, "--summary", help="Show only summary statistics"),
-    export_format: Optional[str] = typer.Option(None, "--export", help="Export format: csv, txt, html"),
+    export_format: Optional[str] = typer.Option(None, "--export", help="Export format: csv, txt, html, enhanced-html"),
     output_file: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path (default: auto-generated)"),
 ):
     """Run security audit to identify misconfigurations and threats (includes GuardDuty findings)"""
@@ -1313,17 +1313,21 @@ def audit(
         # Handle export options
         if export_format:
             # Validate export format
-            if export_format.lower() not in ['csv', 'txt', 'html']:
-                safe_print(f"[red]Error: Unsupported export format '{export_format}'. Supported formats: csv, txt, html[/red]")
+            if export_format.lower() not in ['csv', 'txt', 'html', 'enhanced-html']:
+                safe_print(f"[red]Error: Unsupported export format '{export_format}'. Supported formats: csv, txt, html, enhanced-html[/red]")
                 return
             
             # Generate output filename if not provided
             if not output_file:
                 from datetime import datetime
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                output_file = f"aws_security_audit_{timestamp}.{export_format.lower()}"
+                ext = 'html' if export_format.lower() == 'enhanced-html' else export_format.lower()
+                output_file = f"aws_security_audit_{timestamp}.{ext}"
             
             # Ensure the filename has the correct extension
+            elif export_format.lower() == 'enhanced-html':
+                if not output_file.lower().endswith('.html'):
+                    output_file = f"{output_file}.html"
             elif not output_file.lower().endswith(f'.{export_format.lower()}'):
                 output_file = f"{output_file}.{export_format.lower()}"
             
@@ -1335,6 +1339,10 @@ def audit(
                     audit_service.export_findings_txt(findings, output_file, show_account=show_account)
                 elif export_format.lower() == 'html':
                     audit_service.export_findings_html(findings, output_file, show_account=show_account)
+                elif export_format.lower() == 'enhanced-html':
+                    from aws_super_cli.services.enhanced_reporting import EnhancedSecurityReporter
+                    reporter = EnhancedSecurityReporter()
+                    reporter.export_enhanced_html_report(findings, output_file, show_account=show_account)
                 
                 safe_print(f"[green]Audit results exported to: {output_file}[/green]")
                 
@@ -1415,6 +1423,7 @@ def help_command():
         print("  aws-super-cli audit --services guardduty # GuardDuty threat detection")
         print("  aws-super-cli audit --export csv        # Export results to CSV")
         print("  aws-super-cli audit --export html       # Export results to HTML")
+        print("  aws-super-cli audit --export enhanced-html # Enhanced HTML with executive summary")
         print("  aws-super-cli audit --export txt -o report.txt # Export to specific file")
         print()
         print("ARN Intelligence:")
@@ -1467,6 +1476,7 @@ def help_command():
         safe_print("  [cyan]aws-super-cli audit --services guardduty[/cyan] # GuardDuty threat detection")
         safe_print("  [cyan]aws-super-cli audit --export csv[/cyan]        # Export results to CSV")
         safe_print("  [cyan]aws-super-cli audit --export html[/cyan]       # Export results to HTML")
+        safe_print("  [cyan]aws-super-cli audit --export enhanced-html[/cyan] # Enhanced HTML with executive summary")
         safe_print("  [cyan]aws-super-cli audit --export txt -o report.txt[/cyan] # Export to specific file")
         safe_print()
         safe_print("[bold]ARN Intelligence:[/bold]")
