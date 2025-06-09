@@ -678,7 +678,7 @@ async def run_security_audit(
     all_findings = []
     
     if not services:
-        services = ['s3', 'iam', 'network', 'compute', 'guardduty', 'config']  # Default services to audit
+        services = ['s3', 'iam', 'network', 'compute', 'guardduty', 'config', 'cloudtrail']  # Default services to audit
     
     console = Console()
     
@@ -767,6 +767,16 @@ async def run_security_audit(
                     if profile:
                         finding.account = profile
                 all_findings.extend(config_findings)
+            
+            # Run CloudTrail audit if requested
+            if 'cloudtrail' in services:
+                console.print(f"[dim]Auditing CloudTrail coverage in {profile_display}...[/dim]")
+                cloudtrail_findings = await audit_cloudtrail_coverage(regions, all_regions, profile)
+                # Add profile info to findings
+                for finding in cloudtrail_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(cloudtrail_findings)
     
     return all_findings
 
@@ -836,14 +846,16 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
             'SSH_OPEN_TO_WORLD', 'RDP_OPEN_TO_WORLD', 'ALL_TRAFFIC_OPEN',
             'PUBLIC_ACL', 'PUBLIC_WRITE_ACL', 'PUBLIC_POLICY',
             'PUBLIC_LAMBDA_FUNCTION', 'PUBLIC_INSTANCE_OPEN_ACCESS',
-            'NO_GUARDDUTY_DETECTOR', 'GUARDDUTY_DETECTOR_DISABLED'
+            'NO_GUARDDUTY_DETECTOR', 'GUARDDUTY_DETECTOR_DISABLED',
+            'CLOUDTRAIL_BUCKET_PUBLIC'
         ]:
             categories['critical_exposure'].append(finding)
             
         # Encryption Gaps (high impact)
         elif finding_type in [
             'NO_ENCRYPTION', 'S3_MANAGED_ENCRYPTION', 'AWS_MANAGED_KMS_KEY',
-            'UNENCRYPTED_ENV_VARS', 'INSECURE_TRANSPORT_ALLOWED'
+            'UNENCRYPTED_ENV_VARS', 'INSECURE_TRANSPORT_ALLOWED',
+            'CLOUDTRAIL_NOT_ENCRYPTED', 'NO_LOG_FILE_VALIDATION'
         ]:
             categories['encryption_gaps'].append(finding)
             
@@ -860,7 +872,9 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
             'NO_FLOW_LOGS', 'NO_ACCESS_LOGGING', 'NO_DEAD_LETTER_QUEUE',
             'CONTAINER_INSIGHTS_DISABLED', 'GUARDDUTY_ACCESS_ERROR',
             'GUARDDUTY_REGION_ERROR', 'GUARDDUTY_CLIENT_ERROR',
-            'GUARDDUTY_GENERAL_ERROR'
+            'GUARDDUTY_GENERAL_ERROR', 'NO_GLOBAL_CLOUDTRAIL', 'NO_REGIONAL_CLOUDTRAIL',
+            'NO_GLOBAL_SERVICE_EVENTS', 'CLOUDTRAIL_NOT_LOGGING', 'NO_MANAGEMENT_EVENTS',
+            'NO_DATA_EVENTS', 'CLOUDTRAIL_DELIVERY_ERROR'
         ]:
             categories['monitoring_gaps'].append(finding)
             
@@ -868,7 +882,10 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
         elif finding_type in [
             'UNUSED_SECURITY_GROUP', 'OLD_ACCESS_KEY', 'INACTIVE_USER',
             'OLD_PROGRAMMATIC_USER', 'NO_LIFECYCLE_POLICY',
-            'NO_RECENT_THREATS', 'GUARDDUTY_NOT_SUPPORTED'
+            'NO_RECENT_THREATS', 'GUARDDUTY_NOT_SUPPORTED',
+            'CLOUDTRAIL_NOT_SUPPORTED', 'CLOUDTRAIL_ACCESS_ERROR',
+            'CLOUDTRAIL_REGION_ERROR', 'CLOUDTRAIL_GENERAL_ERROR',
+            'EXCESSIVE_DATA_EVENT_LOGGING'
         ]:
             categories['operational_cleanup'].append(finding)
             
@@ -2641,6 +2658,326 @@ async def audit_aws_config(regions: List[str] = None, all_regions: bool = True, 
             description=f'General error accessing AWS Config: {str(e)}',
             region='global',
             remediation='Check AWS credentials and Config service permissions',
+            account=account
+        ))
+    
+    return findings
+
+
+async def audit_cloudtrail_coverage(regions: List[str] = None, all_regions: bool = True, account: str = None) -> List[SecurityFinding]:
+    """Audit CloudTrail logging coverage and configuration across regions"""
+    findings = []
+    
+    try:
+        # Determine regions to check
+        if regions:
+            regions_to_check = regions
+        elif all_regions:
+            # Use common AWS regions
+            regions_to_check = [
+                'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+                'eu-west-1', 'eu-west-2', 'eu-central-1', 'ap-southeast-1',
+                'ap-southeast-2', 'ap-northeast-1', 'ca-central-1',
+                'sa-east-1', 'ap-south-1'
+            ]
+        else:
+            # Use current region
+            import boto3
+            session = boto3.Session()
+            current_region = session.region_name or 'us-east-1'
+            regions_to_check = [current_region]
+        
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
+        
+        # Global tracking: look for global trails from us-east-1
+        global_trails = []
+        management_event_trails = []
+        data_event_trails = []
+        
+        # First, check us-east-1 for global trails
+        try:
+            async with session.client('cloudtrail', region_name='us-east-1') as cloudtrail_client:
+                trails_response = await cloudtrail_client.describe_trails()
+                all_trails = trails_response.get('trailList', [])
+                
+                for trail in all_trails:
+                    trail_name = trail.get('Name', 'Unknown')
+                    is_multi_region = trail.get('IsMultiRegionTrail', False)
+                    include_global_service_events = trail.get('IncludeGlobalServiceEvents', False)
+                    trail_arn = trail.get('TrailARN', '')
+                    trail_region = trail.get('HomeRegion', 'us-east-1')
+                    
+                    if is_multi_region:
+                        global_trails.append({
+                            'name': trail_name,
+                            'arn': trail_arn,
+                            'region': trail_region,
+                            'global_services': include_global_service_events
+                        })
+                    
+                    # Check trail status
+                    try:
+                        status_response = await cloudtrail_client.get_trail_status(Name=trail_arn)
+                        is_logging = status_response.get('IsLogging', False)
+                        
+                        if not is_logging:
+                            findings.append(SecurityFinding(
+                                resource_type='CloudTrail',
+                                resource_id=trail_name,
+                                finding_type='CLOUDTRAIL_NOT_LOGGING',
+                                severity='HIGH',
+                                description=f'CloudTrail {trail_name} is not currently logging',
+                                region=trail_region,
+                                remediation='Enable logging for CloudTrail to track API activity',
+                                account=account
+                            ))
+                        
+                        # Check for recent log file delivery failures
+                        latest_delivery_error = status_response.get('LatestDeliveryError')
+                        if latest_delivery_error:
+                            findings.append(SecurityFinding(
+                                resource_type='CloudTrail',
+                                resource_id=trail_name,
+                                finding_type='CLOUDTRAIL_DELIVERY_ERROR',
+                                severity='MEDIUM',
+                                description=f'CloudTrail {trail_name} has delivery error: {latest_delivery_error}',
+                                region=trail_region,
+                                remediation='Check S3 bucket permissions and CloudTrail configuration',
+                                account=account
+                            ))
+                    except Exception:
+                        continue
+                    
+                    # Check event selectors for management and data events
+                    try:
+                        selectors_response = await cloudtrail_client.get_event_selectors(TrailName=trail_arn)
+                        event_selectors = selectors_response.get('EventSelectors', [])
+                        
+                        has_management_events = False
+                        has_data_events = False
+                        
+                        for selector in event_selectors:
+                            read_write_type = selector.get('ReadWriteType', 'All')
+                            include_management_events = selector.get('IncludeManagementEvents', True)
+                            data_resources = selector.get('DataResources', [])
+                            
+                            if include_management_events:
+                                has_management_events = True
+                                management_event_trails.append(trail_name)
+                            
+                            if data_resources:
+                                has_data_events = True
+                                data_event_trails.append(trail_name)
+                        
+                        if not has_management_events:
+                            findings.append(SecurityFinding(
+                                resource_type='CloudTrail',
+                                resource_id=trail_name,
+                                finding_type='NO_MANAGEMENT_EVENTS',
+                                severity='HIGH',
+                                description=f'CloudTrail {trail_name} is not logging management events',
+                                region=trail_region,
+                                remediation='Enable management event logging for comprehensive audit trail',
+                                account=account
+                            ))
+                    except Exception:
+                        continue
+                    
+                    # Check encryption
+                    kms_key_id = trail.get('KMSKeyId')
+                    if not kms_key_id:
+                        findings.append(SecurityFinding(
+                            resource_type='CloudTrail',
+                            resource_id=trail_name,
+                            finding_type='CLOUDTRAIL_NOT_ENCRYPTED',
+                            severity='MEDIUM',
+                            description=f'CloudTrail {trail_name} logs are not encrypted with KMS',
+                            region=trail_region,
+                            remediation='Enable KMS encryption for CloudTrail logs to protect sensitive audit data',
+                            account=account
+                        ))
+                    
+                    # Check log file integrity validation
+                    log_file_validation = trail.get('LogFileValidationEnabled', False)
+                    if not log_file_validation:
+                        findings.append(SecurityFinding(
+                            resource_type='CloudTrail',
+                            resource_id=trail_name,
+                            finding_type='NO_LOG_FILE_VALIDATION',
+                            severity='MEDIUM',
+                            description=f'CloudTrail {trail_name} does not have log file validation enabled',
+                            region=trail_region,
+                            remediation='Enable log file validation to ensure log integrity and detect tampering',
+                            account=account
+                        ))
+                    
+                    # Check S3 bucket configuration
+                    s3_bucket_name = trail.get('S3BucketName')
+                    if s3_bucket_name:
+                        try:
+                            async with session.client('s3', region_name='us-east-1') as s3_client:
+                                # Check bucket public access
+                                try:
+                                    bucket_acl_response = await s3_client.get_bucket_acl(Bucket=s3_bucket_name)
+                                    grants = bucket_acl_response.get('Grants', [])
+                                    
+                                    for grant in grants:
+                                        grantee = grant.get('Grantee', {})
+                                        grantee_type = grantee.get('Type', '')
+                                        uri = grantee.get('URI', '')
+                                        permission = grant.get('Permission', '')
+                                        
+                                        if grantee_type == 'Group' and 'AllUsers' in uri:
+                                            findings.append(SecurityFinding(
+                                                resource_type='CloudTrail',
+                                                resource_id=f'{trail_name}-S3-{s3_bucket_name}',
+                                                finding_type='CLOUDTRAIL_BUCKET_PUBLIC',
+                                                severity='HIGH',
+                                                description=f'CloudTrail S3 bucket {s3_bucket_name} allows public access',
+                                                region=trail_region,
+                                                remediation='Remove public access from CloudTrail S3 bucket to protect audit logs',
+                                                account=account
+                                            ))
+                                except Exception:
+                                    continue
+                        except Exception:
+                            continue
+        except Exception as client_error:
+            findings.append(SecurityFinding(
+                resource_type='CloudTrail',
+                resource_id='Global',
+                finding_type='CLOUDTRAIL_ACCESS_ERROR',
+                severity='MEDIUM',
+                description=f'Unable to access CloudTrail service: {str(client_error)}',
+                region='us-east-1',
+                remediation='Check AWS credentials and CloudTrail service permissions',
+                account=account
+            ))
+        
+        # Global coverage assessment
+        if not global_trails:
+            findings.append(SecurityFinding(
+                resource_type='CloudTrail',
+                resource_id='Global',
+                finding_type='NO_GLOBAL_CLOUDTRAIL',
+                severity='HIGH',
+                description='No multi-region CloudTrail found - missing global API activity logging',
+                region='global',
+                remediation='Create a multi-region CloudTrail to log API activity across all regions',
+                account=account
+            ))
+        elif len(global_trails) == 1:
+            # Check if the single global trail covers global services
+            trail = global_trails[0]
+            if not trail['global_services']:
+                findings.append(SecurityFinding(
+                    resource_type='CloudTrail',
+                    resource_id=trail['name'],
+                    finding_type='NO_GLOBAL_SERVICE_EVENTS',
+                    severity='HIGH',
+                    description=f'Global CloudTrail {trail["name"]} does not include global service events',
+                    region=trail['region'],
+                    remediation='Enable global service events to track IAM, CloudFront, and Route53 activities',
+                    account=account
+                ))
+        
+        # Check for regional coverage gaps
+        covered_regions = set()
+        for trail in global_trails:
+            # Global trails cover all regions
+            covered_regions.update(regions_to_check)
+        
+        # Check each region for regional trails if no global coverage
+        for region in regions_to_check:
+            try:
+                async with session.client('cloudtrail', region_name=region) as cloudtrail_client:
+                    trails_response = await cloudtrail_client.describe_trails()
+                    regional_trails = trails_response.get('trailList', [])
+                    
+                    regional_trail_found = False
+                    for trail in regional_trails:
+                        trail_region = trail.get('HomeRegion', region)
+                        if trail_region == region and not trail.get('IsMultiRegionTrail', False):
+                            regional_trail_found = True
+                            covered_regions.add(region)
+                            break
+                    
+                    # If no global trail and no regional trail, flag the gap
+                    if not global_trails and not regional_trail_found:
+                        findings.append(SecurityFinding(
+                            resource_type='CloudTrail',
+                            resource_id=f'Region-{region}',
+                            finding_type='NO_REGIONAL_CLOUDTRAIL',
+                            severity='MEDIUM',
+                            description=f'No CloudTrail logging configured for region {region}',
+                            region=region,
+                            remediation=f'Create CloudTrail for region {region} or configure multi-region trail',
+                            account=account
+                        ))
+            except Exception as regional_error:
+                if 'not supported' in str(regional_error).lower():
+                    findings.append(SecurityFinding(
+                        resource_type='CloudTrail',
+                        resource_id=f'Region-{region}',
+                        finding_type='CLOUDTRAIL_NOT_SUPPORTED',
+                        severity='LOW',
+                        description=f'CloudTrail is not supported in region {region}',
+                        region=region,
+                        remediation='Use CloudTrail in supported regions',
+                        account=account
+                    ))
+                else:
+                    findings.append(SecurityFinding(
+                        resource_type='CloudTrail',
+                        resource_id=f'Region-{region}',
+                        finding_type='CLOUDTRAIL_REGION_ERROR',
+                        severity='MEDIUM',
+                        description=f'Unable to check CloudTrail in region {region}: {str(regional_error)}',
+                        region=region,
+                        remediation='Check AWS credentials and CloudTrail permissions for this region',
+                        account=account
+                    ))
+        
+        # Data event coverage assessment
+        if not data_event_trails:
+            findings.append(SecurityFinding(
+                resource_type='CloudTrail',
+                resource_id='Global',
+                finding_type='NO_DATA_EVENTS',
+                severity='MEDIUM',
+                description='No CloudTrail configured for data events (S3 object-level, Lambda function invocations)',
+                region='global',
+                remediation='Configure data event logging for sensitive S3 buckets and Lambda functions',
+                account=account
+            ))
+        
+        # Check for excessive data event logging (cost optimization)
+        if len(data_event_trails) > 2:
+            findings.append(SecurityFinding(
+                resource_type='CloudTrail',
+                resource_id='Global',
+                finding_type='EXCESSIVE_DATA_EVENT_LOGGING',
+                severity='LOW',
+                description=f'{len(data_event_trails)} trails configured for data events - may incur high costs',
+                region='global',
+                remediation='Review data event configuration to optimize costs while maintaining security coverage',
+                account=account
+            ))
+        
+    except Exception as e:
+        # General error
+        findings.append(SecurityFinding(
+            resource_type='CloudTrail',
+            resource_id='Global',
+            finding_type='CLOUDTRAIL_GENERAL_ERROR',
+            severity='MEDIUM',
+            description=f'General error accessing CloudTrail: {str(e)}',
+            region='global',
+            remediation='Check AWS credentials and CloudTrail service permissions',
             account=account
         ))
     
