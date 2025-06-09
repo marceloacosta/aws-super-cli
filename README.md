@@ -17,7 +17,7 @@ Unlike other tools that focus on single concerns, AWS Super CLI provides enterpr
 - **Account Management** - Smart categorization, health monitoring, and nickname management across AWS accounts
 - **ARN Utilities** - Human-readable ARN display with smart truncation and explanation capabilities
 - **Network security auditing** - Detect SSH/RDP open to world, overly permissive security groups
-- **Professional Security Reports** - Export findings to CSV, TXT, and HTML formats for compliance and reporting
+- **Professional Security Reports** - Export findings to CSV, TXT, HTML, and enhanced HTML with executive summaries for compliance and reporting
 - **Service-level credit usage analysis** - See exactly which AWS services consume promotional credits
 - **Multi-account security posture** - Unified security scoring across AWS organizations
 
@@ -35,6 +35,9 @@ aws-super-cli accounts                    # List accounts with categorization & 
 
 # Run comprehensive security audit
 aws-super-cli audit --summary
+
+# Generate complete executive security report (most comprehensive)
+aws-super-cli audit --all-accounts --export enhanced-html -o security-report.html
 
 # List EC2 instances across all accounts  
 aws-super-cli ls ec2 --all-accounts
@@ -241,21 +244,27 @@ aws-super-cli audit --services cloudwatch  # CloudWatch alarm coverage only
 AWS Super CLI provides professional export capabilities for security audit results, verified with real AWS infrastructure:
 
 ```bash
-aws-super-cli audit --export-csv report.csv              # CSV format for spreadsheet analysis
-aws-super-cli audit --export-txt report.txt              # Text format for documentation
-aws-super-cli audit --export-html report.html            # Professional HTML report for stakeholders
+aws-super-cli audit --export csv -o report.csv           # CSV format for spreadsheet analysis
+aws-super-cli audit --export txt -o report.txt           # Text format for documentation  
+aws-super-cli audit --export html -o report.html         # Professional HTML report
+aws-super-cli audit --export enhanced-html -o executive-report.html  # Executive summary with compliance mapping
+
+# Most comprehensive export for executive presentations
+aws-super-cli audit --all-accounts --export enhanced-html -o complete-security-report.html
 
 # Multi-account exports with account information
-aws-super-cli audit --all-accounts --export-html compliance-report.html
+aws-super-cli audit --all-accounts --export csv -o multi-account-findings.csv
 ```
 
 **Export Features:**
 - **CSV Export**: Structured data for spreadsheet analysis and integration with other tools
 - **TXT Export**: Human-readable text format with comprehensive summary statistics
-- **HTML Export**: Professional, styled reports ready for executive presentation
+- **HTML Export**: Professional, styled reports ready for stakeholder presentation
+- **Enhanced HTML Export**: Executive summaries with compliance mapping (SOC2, CIS, NIST), risk assessment, and strategic recommendations
 - **Multi-account Support**: Account information included when auditing across multiple accounts
 - **Summary Statistics**: Security scores, findings breakdown, and service-level analysis
 - **Remediation Guidance**: Actionable remediation steps for every finding
+- **Compliance Mapping**: Framework-specific compliance status for enterprise requirements
 
 **Real-World Verified**: Export functionality tested and verified with actual AWS account data, generating professional compliance reports from live infrastructure findings.
 

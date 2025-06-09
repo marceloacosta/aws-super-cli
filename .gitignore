@@ -198,6 +198,14 @@ requirements-dev.txt
 
 # OS specific files
 .DS_Store
+
+# Sensitive audit reports and real data (prevent accidental commits of personal info)
+REAL_*.html
+*_audit_report_*.html
+aws_security_audit_*.html
+*@*.tech
+*@*.com
+test_*.html
 .DS_Store?
 ._*
 .Spotlight-V100
