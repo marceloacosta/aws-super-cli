@@ -112,6 +112,7 @@ class AccountIntelligence:
     async def check_account_health(self, profile_name: str) -> Tuple[AccountHealth, List[str]]:
         """Perform comprehensive account health check"""
         issues = []
+        service_details = []
         
         try:
             # Create session for this profile
@@ -122,19 +123,22 @@ class AccountIntelligence:
             try:
                 sts = session.client('sts')
                 identity = sts.get_caller_identity()
+                service_details.append("✓ Authentication: Successful")
             except (ClientError, NoCredentialsError) as e:
-                issues.append(f"Authentication failed: {str(e)}")
+                error_msg = f"Authentication failed: {str(e)}"
+                issues.append(error_msg)
+                service_details.append(f"✗ Authentication: {error_msg}")
                 return AccountHealth.ERROR, issues
             
             # Check multiple services to ensure broad access
             health_checks = [
-                ('EC2', 'ec2'),
-                ('IAM', 'iam'),
-                ('S3', 's3')
+                ('EC2', 'ec2', 'describe_regions'),
+                ('IAM', 'iam', 'get_account_summary'),
+                ('S3', 's3', 'list_buckets')
             ]
             
             failed_services = []
-            for service_name, service_code in health_checks:
+            for service_name, service_code, test_operation in health_checks:
                 try:
                     client = session.client(service_code, region_name='us-east-1')
                     # Light test operation for each service
@@ -144,14 +148,23 @@ class AccountIntelligence:
                         client.get_account_summary()
                     elif service_code == 's3':
                         client.list_buckets()
+                    
+                    service_details.append(f"✓ {service_name}: Accessible")
                 except ClientError as e:
                     error_code = e.response.get('Error', {}).get('Code', 'Unknown')
                     if error_code in ['AccessDenied', 'UnauthorizedOperation']:
-                        issues.append(f"Limited {service_name} permissions")
+                        permission_issue = f"Limited {service_name} permissions ({error_code})"
+                        issues.append(permission_issue)
+                        service_details.append(f"⚠ {service_name}: {permission_issue}")
                     else:
                         failed_services.append(service_name)
-                except Exception:
+                        service_details.append(f"✗ {service_name}: Failed ({error_code})")
+                except Exception as e:
                     failed_services.append(service_name)
+                    service_details.append(f"✗ {service_name}: Error ({str(e)[:50]})")
+            
+            # Store service details for potential display
+            setattr(self, f'_health_details_{profile_name}', service_details)
             
             # Determine health status
             if failed_services:
@@ -163,8 +176,15 @@ class AccountIntelligence:
                 return AccountHealth.HEALTHY, []
                 
         except Exception as e:
-            issues.append(f"Health check failed: {str(e)}")
+            error_msg = f"Health check failed: {str(e)}"
+            issues.append(error_msg)
+            service_details.append(f"✗ Health Check: {error_msg}")
+            setattr(self, f'_health_details_{profile_name}', service_details)
             return AccountHealth.ERROR, issues
+    
+    def get_health_details(self, profile_name: str) -> List[str]:
+        """Get detailed health check information for a profile"""
+        return getattr(self, f'_health_details_{profile_name}', [])
     
     async def get_account_activity(self, profile_name: str) -> Optional[datetime]:
         """Get last activity timestamp for an account"""

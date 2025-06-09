@@ -328,6 +328,8 @@ aws-super-cli accounts-dashboard           # Comprehensive account overview
 
 # Account health monitoring
 aws-super-cli accounts-health              # Detailed health assessment
+aws-super-cli accounts-health --explain    # Health criteria explanation
+aws-super-cli accounts-health --details    # Detailed health breakdown
 aws-super-cli accounts --no-health-check   # Fast listing without health checks
 ```
 
@@ -502,3 +504,32 @@ Apache 2.0
 ---
 
 **AWS Super CLI** - AWS security auditing, multi-account resource discovery, and service-level cost intelligence.
+
+### Account Health Criteria
+
+AWS Super CLI performs comprehensive health checks on each account to ensure proper access and functionality:
+
+**✓ HEALTHY** - All services accessible:
+- Authentication successful (STS get_caller_identity)
+- EC2 service accessible (describe_regions)
+- IAM service accessible (get_account_summary) 
+- S3 service accessible (list_buckets)
+- No permission restrictions detected
+
+**⚠ WARNING** - Limited permissions:
+- Basic authentication successful
+- Some services have AccessDenied/UnauthorizedOperation errors
+- No complete service failures
+
+**✗ ERROR** - Major access issues:
+- Authentication failures (NoCredentialsError)
+- Complete service access failures
+- Invalid credentials or expired tokens
+
+**? UNKNOWN** - Health check not performed:
+- Used when `--no-health-check` flag is specified
+- Faster account listing without connectivity tests
+
+Use `aws-super-cli accounts-health --explain` for detailed explanations and troubleshooting guidance.
+
+**Enhanced Organization:**

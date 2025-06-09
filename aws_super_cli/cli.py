@@ -693,7 +693,13 @@ def accounts(
     category: Optional[str] = typer.Option(None, "--category", help="Filter by account category"),
     show_details: bool = typer.Option(False, "--details", help="Show detailed account information")
 ):
-    """List available AWS accounts with intelligent categorization and health checks"""
+    """List available AWS accounts with intelligent categorization and health checks
+    
+    Health Status: HEALTHY (all services accessible), WARNING (limited permissions), 
+    ERROR (access issues), UNKNOWN (health check disabled).
+    
+    Run 'aws-super-cli accounts-health --explain' for detailed health criteria.
+    """
     safe_print("[bold cyan]AWS Account Intelligence[/bold cyan]")
     safe_print()
     
@@ -789,10 +795,66 @@ def accounts(
 
 
 @app.command(name="accounts-health", help="Detailed health information for AWS accounts")
-def accounts_health():
+def accounts_health(
+    explain: bool = typer.Option(False, "--explain", help="Show detailed explanation of health check criteria"),
+    details: bool = typer.Option(False, "--details", help="Show detailed health check breakdown for each account")
+):
     """Show detailed health information for AWS accounts"""
     safe_print("[bold cyan]AWS Account Health Report[/bold cyan]")
     safe_print()
+    
+    if explain:
+        # Show detailed health criteria explanation
+        safe_print("[bold]Health Check Criteria Explanation[/bold]")
+        safe_print()
+        
+        safe_print("[green bold]✓ HEALTHY[/green bold] - All checks pass:")
+        safe_print("  ✓ Authentication successful (STS get_caller_identity)")
+        safe_print("  ✓ EC2 service accessible (describe_regions)")
+        safe_print("  ✓ IAM service accessible (get_account_summary)")
+        safe_print("  ✓ S3 service accessible (list_buckets)")
+        safe_print("  ✓ No permission restrictions detected")
+        safe_print()
+        
+        safe_print("[yellow bold]⚠ WARNING[/yellow bold] - Limited permissions:")
+        safe_print("  ✓ Basic authentication successful")
+        safe_print("  ⚠ Some services have limited permissions")
+        safe_print("  ⚠ AccessDenied or UnauthorizedOperation errors")
+        safe_print("  ✓ No complete service failures")
+        safe_print()
+        
+        safe_print("[red bold]✗ ERROR[/red bold] - Major access issues:")
+        safe_print("  ✗ Authentication failures (NoCredentialsError)")
+        safe_print("  ✗ Complete service access failures")
+        safe_print("  ✗ Unable to perform basic operations")
+        safe_print("  ✗ Invalid credentials or expired tokens")
+        safe_print()
+        
+        safe_print("[dim bold]? UNKNOWN[/dim bold] - Health check not performed:")
+        safe_print("  • Used when --no-health-check flag is specified")
+        safe_print("  • Faster account listing without connectivity tests")
+        safe_print()
+        
+        safe_print("[bold]Services Tested[/bold]")
+        safe_print("  • [cyan]EC2[/cyan]: describe_regions() - Tests compute service access")
+        safe_print("  • [cyan]IAM[/cyan]: get_account_summary() - Tests identity management")
+        safe_print("  • [cyan]S3[/cyan]: list_buckets() - Tests storage service access")
+        safe_print()
+        
+        safe_print("[bold]Troubleshooting[/bold]")
+        safe_print("  [yellow]WARNING status[/yellow]: Check IAM policy permissions for restricted services")
+        safe_print("  [red]ERROR status[/red]: Verify AWS credentials with 'aws sts get-caller-identity'")
+        safe_print("  [dim]For specific issues, run 'aws-super-cli accounts-health --details' for more information[/dim]")
+        safe_print()
+        
+        safe_print("[bold]Usage Examples[/bold]")
+        safe_print("  [cyan]aws-super-cli accounts-health[/cyan]                    # Health report")
+        safe_print("  [cyan]aws-super-cli accounts-health --explain[/cyan]          # This explanation")
+        safe_print("  [cyan]aws-super-cli accounts-health --details[/cyan]          # Detailed health breakdown")
+        safe_print("  [cyan]aws-super-cli accounts --no-health-check[/cyan]        # Fast listing")
+        safe_print("  [cyan]aws-super-cli accounts --category production[/cyan]    # Filter unhealthy production")
+        safe_print()
+        return
     
     try:
         safe_print("[dim]Performing comprehensive health checks...[/dim]")
@@ -827,6 +889,14 @@ def accounts_health():
             for account in error:
                 safe_print(f"  [red]✗ {account.name}[/red] ({account.account_id})")
                 safe_print(f"    Category: {account.category.value}")
+                
+                if details:
+                    # Show detailed health check breakdown
+                    health_details = account_intelligence.get_health_details(account.name)
+                    if health_details:
+                        safe_print("    Health Details:")
+                        for detail in health_details:
+                            safe_print(f"      {detail}")
             safe_print()
         
         if warning:
@@ -834,12 +904,29 @@ def accounts_health():
             for account in warning:
                 safe_print(f"  [yellow]⚠ {account.name}[/yellow] ({account.account_id})")
                 safe_print(f"    Category: {account.category.value}")
+                
+                if details:
+                    # Show detailed health check breakdown
+                    health_details = account_intelligence.get_health_details(account.name)
+                    if health_details:
+                        safe_print("    Health Details:")
+                        for detail in health_details:
+                            safe_print(f"      {detail}")
             safe_print()
         
         if healthy:
             safe_print("[green bold]Healthy Accounts:[/green bold]")
             for account in healthy:
-                safe_print(f"  [green]✓ {account.name}[/green] ({account.account_id}) - {account.category.value}")
+                if details:
+                    safe_print(f"  [green]✓ {account.name}[/green] ({account.account_id}) - {account.category.value}")
+                    # Show detailed health check breakdown
+                    health_details = account_intelligence.get_health_details(account.name)
+                    if health_details:
+                        safe_print("    Health Details:")
+                        for detail in health_details:
+                            safe_print(f"      {detail}")
+                else:
+                    safe_print(f"  [green]✓ {account.name}[/green] ({account.account_id}) - {account.category.value}")
         
         # Recommendations
         safe_print("\n[bold]Recommendations:[/bold]")
@@ -1231,6 +1318,8 @@ def help_command():
         print("  aws-super-cli accounts --category production # Filter by category") 
         print("  aws-super-cli accounts-dashboard         # Comprehensive account overview")
         print("  aws-super-cli accounts-health            # Detailed health report")
+        print("  aws-super-cli accounts-health --explain   # Health criteria explanation")
+        print("  aws-super-cli accounts-health --details   # Health check breakdown")
         print("  aws-super-cli accounts-nickname myprofile \"Name\" # Set account nicknames")
         print()
         print("For detailed help:")
@@ -1280,6 +1369,8 @@ def help_command():
         safe_print("  [cyan]aws-super-cli accounts --category production[/cyan] # Filter by category") 
         safe_print("  [cyan]aws-super-cli accounts-dashboard[/cyan]         # Comprehensive account overview")
         safe_print("  [cyan]aws-super-cli accounts-health[/cyan]            # Detailed health report")
+        safe_print("  [cyan]aws-super-cli accounts-health --explain[/cyan]  # Health criteria explanation")
+        safe_print("  [cyan]aws-super-cli accounts-health --details[/cyan]  # Health check breakdown")
         safe_print("  [cyan]aws-super-cli accounts-nickname myprofile \"Name\"[/cyan] # Set account nicknames")
         safe_print()
         safe_print("[bold]For detailed help:[/bold]")
