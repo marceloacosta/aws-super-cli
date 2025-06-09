@@ -206,6 +206,17 @@ aws-super-cli audit --services cloudtrail  # CloudTrail logging coverage only
 - S3 bucket security for CloudTrail log storage
 - Regional coverage gaps and logging blind spots
 
+**RDS Database Security:**
+- Public accessibility detection for RDS instances and clusters
+- Storage encryption verification for data at rest protection
+- Public snapshot exposure detection and remediation
+- Multi-AZ deployment verification for high availability
+- Backup retention period compliance (minimum 7 days recommended)
+- Deletion protection status for accidental data loss prevention
+- Performance Insights encryption with customer-managed KMS keys
+- Aurora cluster CloudWatch logs export configuration
+- Default parameter group usage identification
+
 ### Security Report Export
 
 AWS Super CLI provides professional export capabilities for security audit results, verified with real AWS infrastructure:

@@ -1084,7 +1084,7 @@ def accounts_dashboard():
 
 @app.command()
 def audit(
-    services: Optional[str] = typer.Option("s3,iam,network,compute,guardduty,config,cloudtrail", "--services", help="Comma-separated services to audit (s3, iam, network, compute, guardduty, config, cloudtrail)"),
+    services: Optional[str] = typer.Option("s3,iam,network,compute,guardduty,config,cloudtrail,rds", "--services", help="Comma-separated services to audit (s3, iam, network, compute, guardduty, config, cloudtrail, rds)"),
     region: Optional[str] = typer.Option(None, "--region", "-r", help="Specific region to query"),
     all_regions: bool = typer.Option(True, "--all-regions/--no-all-regions", help="Query all regions (default) or current region only"),
     all_accounts: bool = typer.Option(False, "--all-accounts", help="Query all accessible AWS accounts"),

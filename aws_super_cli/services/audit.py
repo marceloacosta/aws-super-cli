@@ -678,7 +678,7 @@ async def run_security_audit(
     all_findings = []
     
     if not services:
-        services = ['s3', 'iam', 'network', 'compute', 'guardduty', 'config', 'cloudtrail']  # Default services to audit
+        services = ['s3', 'iam', 'network', 'compute', 'guardduty', 'config', 'cloudtrail', 'rds']  # Default services to audit
     
     console = Console()
     
@@ -777,6 +777,16 @@ async def run_security_audit(
                     if profile:
                         finding.account = profile
                 all_findings.extend(cloudtrail_findings)
+            
+            # Run RDS audit if requested
+            if 'rds' in services:
+                console.print(f"[dim]Auditing RDS security in {profile_display}...[/dim]")
+                rds_findings = await audit_rds_security(regions, all_regions, profile)
+                # Add profile info to findings
+                for finding in rds_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(rds_findings)
     
     return all_findings
 
@@ -847,7 +857,7 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
             'PUBLIC_ACL', 'PUBLIC_WRITE_ACL', 'PUBLIC_POLICY',
             'PUBLIC_LAMBDA_FUNCTION', 'PUBLIC_INSTANCE_OPEN_ACCESS',
             'NO_GUARDDUTY_DETECTOR', 'GUARDDUTY_DETECTOR_DISABLED',
-            'CLOUDTRAIL_BUCKET_PUBLIC'
+            'CLOUDTRAIL_BUCKET_PUBLIC', 'RDS_PUBLIC_ACCESS', 'RDS_PUBLIC_SNAPSHOT'
         ]:
             categories['critical_exposure'].append(finding)
             
@@ -855,7 +865,8 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
         elif finding_type in [
             'NO_ENCRYPTION', 'S3_MANAGED_ENCRYPTION', 'AWS_MANAGED_KMS_KEY',
             'UNENCRYPTED_ENV_VARS', 'INSECURE_TRANSPORT_ALLOWED',
-            'CLOUDTRAIL_NOT_ENCRYPTED', 'NO_LOG_FILE_VALIDATION'
+            'CLOUDTRAIL_NOT_ENCRYPTED', 'NO_LOG_FILE_VALIDATION',
+            'RDS_UNENCRYPTED_STORAGE', 'RDS_CLUSTER_UNENCRYPTED_STORAGE', 'RDS_PERFORMANCE_INSIGHTS_NOT_ENCRYPTED'
         ]:
             categories['encryption_gaps'].append(finding)
             
@@ -863,7 +874,8 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
         elif finding_type in [
             'ADMIN_USER', 'ADMIN_INLINE_POLICY', 'WILDCARD_POLICY',
             'BROAD_POLICY', 'HIGH_RISK_PERMISSION', 'OVERPRIVILEGED_EXECUTION_ROLE',
-            'VERY_OLD_ACCESS_KEY'
+            'VERY_OLD_ACCESS_KEY', 'RDS_SHORT_BACKUP_RETENTION', 'RDS_CLUSTER_SHORT_BACKUP_RETENTION',
+            'RDS_NO_DELETION_PROTECTION', 'RDS_CLUSTER_NO_DELETION_PROTECTION', 'RDS_NOT_MULTI_AZ'
         ]:
             categories['access_control'].append(finding)
             
@@ -874,7 +886,7 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
             'GUARDDUTY_REGION_ERROR', 'GUARDDUTY_CLIENT_ERROR',
             'GUARDDUTY_GENERAL_ERROR', 'NO_GLOBAL_CLOUDTRAIL', 'NO_REGIONAL_CLOUDTRAIL',
             'NO_GLOBAL_SERVICE_EVENTS', 'CLOUDTRAIL_NOT_LOGGING', 'NO_MANAGEMENT_EVENTS',
-            'NO_DATA_EVENTS', 'CLOUDTRAIL_DELIVERY_ERROR'
+            'NO_DATA_EVENTS', 'CLOUDTRAIL_DELIVERY_ERROR', 'RDS_CLUSTER_NO_CLOUDWATCH_LOGS'
         ]:
             categories['monitoring_gaps'].append(finding)
             
@@ -885,7 +897,7 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
             'NO_RECENT_THREATS', 'GUARDDUTY_NOT_SUPPORTED',
             'CLOUDTRAIL_NOT_SUPPORTED', 'CLOUDTRAIL_ACCESS_ERROR',
             'CLOUDTRAIL_REGION_ERROR', 'CLOUDTRAIL_GENERAL_ERROR',
-            'EXCESSIVE_DATA_EVENT_LOGGING'
+            'EXCESSIVE_DATA_EVENT_LOGGING', 'RDS_NO_AUTO_MINOR_VERSION_UPGRADE', 'RDS_DEFAULT_PARAMETER_GROUP'
         ]:
             categories['operational_cleanup'].append(finding)
             
@@ -2980,5 +2992,326 @@ async def audit_cloudtrail_coverage(regions: List[str] = None, all_regions: bool
             remediation='Check AWS credentials and CloudTrail service permissions',
             account=account
         ))
+    
+    return findings
+
+
+async def audit_rds_security(regions: List[str] = None, all_regions: bool = True, account: str = None) -> List[SecurityFinding]:
+    """Audit RDS instances and clusters for security misconfigurations"""
+    findings = []
+    
+    if not regions:
+        if all_regions:
+            # Get all available regions for RDS
+            try:
+                session = aioboto3.Session()
+                async with session.client('ec2', region_name='us-east-1') as ec2_client:
+                    regions_response = await ec2_client.describe_regions()
+                    regions = [region['RegionName'] for region in regions_response['Regions']]
+            except Exception:
+                regions = ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-southeast-1']  # Fallback regions
+        else:
+            regions = ['us-east-1']  # Default region
+    
+    for region in regions:
+        region_findings = await _audit_rds_security_region(region, account)
+        findings.extend(region_findings)
+    
+    return findings
+
+
+async def _audit_rds_security_region(region: str, account: str = None) -> List[SecurityFinding]:
+    """Audit RDS instances and clusters for security misconfigurations in a specific region"""
+    findings = []
+    
+    try:
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
+        
+        async with session.client('rds', region_name=region) as rds_client:
+            # Audit RDS instances
+            instance_findings = await _audit_rds_instances(rds_client, region, account)
+            findings.extend(instance_findings)
+            
+            # Audit RDS snapshots for public exposure
+            snapshot_findings = await _audit_rds_snapshots(rds_client, region, account)
+            findings.extend(snapshot_findings)
+            
+            # Audit RDS clusters (Aurora)
+            cluster_findings = await _audit_rds_clusters(rds_client, region, account)
+            findings.extend(cluster_findings)
+            
+    except Exception as e:
+        rprint(f"[red]Error auditing RDS security in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_rds_instances(rds_client, region: str, account: str = None) -> List[SecurityFinding]:
+    """Audit RDS instances for security misconfigurations"""
+    findings = []
+    
+    try:
+        # Get all RDS instances
+        paginator = rds_client.get_paginator('describe_db_instances')
+        
+        async for page in paginator.paginate():
+            instances = page.get('DBInstances', [])
+            
+            for instance in instances:
+                instance_id = instance.get('DBInstanceIdentifier', 'Unknown')
+                instance_status = instance.get('DBInstanceStatus', 'Unknown')
+                
+                # Skip instances that are being deleted or in error state
+                if instance_status in ['deleting', 'failed', 'incompatible-parameters']:
+                    continue
+                
+                # Check for public accessibility - CRITICAL SECURITY ISSUE
+                public_accessible = instance.get('PubliclyAccessible', False)
+                if public_accessible:
+                    findings.append(SecurityFinding(
+                        resource_type='RDS',
+                        resource_id=instance_id,
+                        finding_type='RDS_PUBLIC_ACCESS',
+                        severity='HIGH',
+                        description='RDS instance is publicly accessible - potential data breach risk',
+                        region=region,
+                        remediation='Disable public accessibility and use private subnets with VPC endpoints',
+                        account=account
+                    ))
+                
+                # Check for storage encryption
+                storage_encrypted = instance.get('StorageEncrypted', False)
+                if not storage_encrypted:
+                    findings.append(SecurityFinding(
+                        resource_type='RDS',
+                        resource_id=instance_id,
+                        finding_type='RDS_UNENCRYPTED_STORAGE',
+                        severity='HIGH',
+                        description='RDS instance storage is not encrypted - data at rest vulnerability',
+                        region=region,
+                        remediation='Enable storage encryption for RDS instances (requires recreation)',
+                        account=account
+                    ))
+                
+                # Check backup retention period
+                backup_retention = instance.get('BackupRetentionPeriod', 0)
+                if backup_retention < 7:
+                    findings.append(SecurityFinding(
+                        resource_type='RDS',
+                        resource_id=instance_id,
+                        finding_type='RDS_SHORT_BACKUP_RETENTION',
+                        severity='MEDIUM',
+                        description=f'RDS instance has insufficient backup retention: {backup_retention} days (minimum recommended: 7)',
+                        region=region,
+                        remediation='Increase backup retention period to at least 7 days for compliance',
+                        account=account
+                    ))
+                
+                # Check deletion protection
+                deletion_protection = instance.get('DeletionProtection', False)
+                if not deletion_protection:
+                    findings.append(SecurityFinding(
+                        resource_type='RDS',
+                        resource_id=instance_id,
+                        finding_type='RDS_NO_DELETION_PROTECTION',
+                        severity='MEDIUM',
+                        description='RDS instance does not have deletion protection enabled',
+                        region=region,
+                        remediation='Enable deletion protection to prevent accidental data loss',
+                        account=account
+                    ))
+                
+                # Check Multi-AZ deployment for high availability
+                multi_az = instance.get('MultiAZ', False)
+                if not multi_az and instance_status == 'available':
+                    findings.append(SecurityFinding(
+                        resource_type='RDS',
+                        resource_id=instance_id,
+                        finding_type='RDS_NOT_MULTI_AZ',
+                        severity='MEDIUM',
+                        description='RDS instance is not configured for Multi-AZ deployment',
+                        region=region,
+                        remediation='Enable Multi-AZ for high availability and automated backup verification',
+                        account=account
+                    ))
+                
+                # Check auto minor version upgrade for security patches
+                auto_minor_version_upgrade = instance.get('AutoMinorVersionUpgrade', False)
+                if not auto_minor_version_upgrade:
+                    findings.append(SecurityFinding(
+                        resource_type='RDS',
+                        resource_id=instance_id,
+                        finding_type='RDS_NO_AUTO_MINOR_VERSION_UPGRADE',
+                        severity='LOW',
+                        description='RDS instance does not have auto minor version upgrade enabled',
+                        region=region,
+                        remediation='Enable auto minor version upgrade for automatic security patches',
+                        account=account
+                    ))
+                
+                # Check for default parameter group usage
+                db_parameter_groups = instance.get('DBParameterGroups', [])
+                for pg in db_parameter_groups:
+                    pg_name = pg.get('DBParameterGroupName', '')
+                    if pg_name.startswith('default.'):
+                        findings.append(SecurityFinding(
+                            resource_type='RDS',
+                            resource_id=instance_id,
+                            finding_type='RDS_DEFAULT_PARAMETER_GROUP',
+                            severity='LOW',
+                            description=f'RDS instance uses default parameter group: {pg_name}',
+                            region=region,
+                            remediation='Create custom parameter group for security and performance optimization',
+                            account=account
+                        ))
+                
+                # Check performance insights encryption
+                performance_insights_enabled = instance.get('PerformanceInsightsEnabled', False)
+                if performance_insights_enabled:
+                    performance_insights_kms_key = instance.get('PerformanceInsightsKMSKeyId')
+                    if not performance_insights_kms_key:
+                        findings.append(SecurityFinding(
+                            resource_type='RDS',
+                            resource_id=instance_id,
+                            finding_type='RDS_PERFORMANCE_INSIGHTS_NOT_ENCRYPTED',
+                            severity='MEDIUM',
+                            description='RDS Performance Insights is enabled but not encrypted with customer KMS key',
+                            region=region,
+                            remediation='Configure customer-managed KMS key for Performance Insights encryption',
+                            account=account
+                        ))
+                
+    except Exception as e:
+        rprint(f"[red]Error auditing RDS instances in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_rds_snapshots(rds_client, region: str, account: str = None) -> List[SecurityFinding]:
+    """Audit RDS snapshots for public exposure"""
+    findings = []
+    
+    try:
+        # Get manual snapshots (automated snapshots cannot be made public)
+        response = await rds_client.describe_db_snapshots(
+            SnapshotType='manual',
+            MaxRecords=100
+        )
+        
+        snapshots = response.get('DBSnapshots', [])
+        
+        for snapshot in snapshots:
+            snapshot_id = snapshot.get('DBSnapshotIdentifier', 'Unknown')
+            
+            # Check if snapshot is public - CRITICAL SECURITY ISSUE
+            try:
+                attributes = await rds_client.describe_db_snapshot_attributes(
+                    DBSnapshotIdentifier=snapshot_id
+                )
+                
+                for attr in attributes.get('DBSnapshotAttributesResult', {}).get('DBSnapshotAttributes', []):
+                    if attr.get('AttributeName') == 'restore':
+                        attribute_values = attr.get('AttributeValues', [])
+                        if 'all' in attribute_values:
+                            findings.append(SecurityFinding(
+                                resource_type='RDS',
+                                resource_id=snapshot_id,
+                                finding_type='RDS_PUBLIC_SNAPSHOT',
+                                severity='HIGH',
+                                description='RDS snapshot is publicly accessible - severe data exposure risk',
+                                region=region,
+                                remediation='Immediately remove public access from RDS snapshot',
+                                account=account
+                            ))
+                            break
+            except Exception:
+                # Skip snapshots we can't access (might be cross-account)
+                continue
+                
+    except Exception as e:
+        rprint(f"[red]Error auditing RDS snapshots in region {region}: {e}[/red]")
+    
+    return findings
+
+
+async def _audit_rds_clusters(rds_client, region: str, account: str = None) -> List[SecurityFinding]:
+    """Audit RDS clusters (Aurora) for security misconfigurations"""
+    findings = []
+    
+    try:
+        # Get all RDS clusters
+        response = await rds_client.describe_db_clusters()
+        clusters = response.get('DBClusters', [])
+        
+        for cluster in clusters:
+            cluster_id = cluster.get('DBClusterIdentifier', 'Unknown')
+            cluster_status = cluster.get('Status', 'Unknown')
+            
+            # Skip clusters that are being deleted
+            if cluster_status in ['deleting', 'failed']:
+                continue
+            
+            # Check for storage encryption
+            storage_encrypted = cluster.get('StorageEncrypted', False)
+            if not storage_encrypted:
+                findings.append(SecurityFinding(
+                    resource_type='RDS',
+                    resource_id=cluster_id,
+                    finding_type='RDS_CLUSTER_UNENCRYPTED_STORAGE',
+                    severity='HIGH',
+                    description='RDS cluster storage is not encrypted - data at rest vulnerability',
+                    region=region,
+                    remediation='Enable storage encryption for RDS clusters (requires recreation)',
+                    account=account
+                ))
+            
+            # Check backup retention period
+            backup_retention = cluster.get('BackupRetentionPeriod', 0)
+            if backup_retention < 7:
+                findings.append(SecurityFinding(
+                    resource_type='RDS',
+                    resource_id=cluster_id,
+                    finding_type='RDS_CLUSTER_SHORT_BACKUP_RETENTION',
+                    severity='MEDIUM',
+                    description=f'RDS cluster has insufficient backup retention: {backup_retention} days (minimum recommended: 7)',
+                    region=region,
+                    remediation='Increase backup retention period to at least 7 days for compliance',
+                    account=account
+                ))
+            
+            # Check deletion protection
+            deletion_protection = cluster.get('DeletionProtection', False)
+            if not deletion_protection:
+                findings.append(SecurityFinding(
+                    resource_type='RDS',
+                    resource_id=cluster_id,
+                    finding_type='RDS_CLUSTER_NO_DELETION_PROTECTION',
+                    severity='MEDIUM',
+                    description='RDS cluster does not have deletion protection enabled',
+                    region=region,
+                    remediation='Enable deletion protection to prevent accidental data loss',
+                    account=account
+                ))
+            
+            # Check for enabled logging
+            enabled_cloudwatch_logs_exports = cluster.get('EnabledCloudwatchLogsExports', [])
+            if not enabled_cloudwatch_logs_exports:
+                findings.append(SecurityFinding(
+                    resource_type='RDS',
+                    resource_id=cluster_id,
+                    finding_type='RDS_CLUSTER_NO_CLOUDWATCH_LOGS',
+                    severity='LOW',
+                    description='RDS cluster does not export logs to CloudWatch',
+                    region=region,
+                    remediation='Enable CloudWatch logs export for audit trail and monitoring',
+                    account=account
+                ))
+                
+    except Exception as e:
+        rprint(f"[red]Error auditing RDS clusters in region {region}: {e}[/red]")
     
     return findings
