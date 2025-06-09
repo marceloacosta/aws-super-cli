@@ -678,7 +678,7 @@ async def run_security_audit(
     all_findings = []
     
     if not services:
-        services = ['s3', 'iam', 'network', 'compute']  # Default services to audit
+        services = ['s3', 'iam', 'network', 'compute', 'guardduty']  # Default services to audit
     
     console = Console()
     
@@ -747,6 +747,16 @@ async def run_security_audit(
                     if profile:
                         finding.account = profile
                 all_findings.extend(compute_findings)
+            
+            # Run GuardDuty audit if requested
+            if 'guardduty' in services:
+                console.print(f"[dim]Auditing GuardDuty findings in {profile_display}...[/dim]")
+                guardduty_findings = await audit_guardduty_findings(regions, all_regions, profile)
+                # Add profile info to findings
+                for finding in guardduty_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(guardduty_findings)
     
     return all_findings
 
@@ -815,7 +825,8 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
         if finding_type in [
             'SSH_OPEN_TO_WORLD', 'RDP_OPEN_TO_WORLD', 'ALL_TRAFFIC_OPEN',
             'PUBLIC_ACL', 'PUBLIC_WRITE_ACL', 'PUBLIC_POLICY',
-            'PUBLIC_LAMBDA_FUNCTION', 'PUBLIC_INSTANCE_OPEN_ACCESS'
+            'PUBLIC_LAMBDA_FUNCTION', 'PUBLIC_INSTANCE_OPEN_ACCESS',
+            'NO_GUARDDUTY_DETECTOR', 'GUARDDUTY_DETECTOR_DISABLED'
         ]:
             categories['critical_exposure'].append(finding)
             
@@ -837,19 +848,23 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
         # Monitoring Gaps (medium impact - important but not immediate vulnerability)
         elif finding_type in [
             'NO_FLOW_LOGS', 'NO_ACCESS_LOGGING', 'NO_DEAD_LETTER_QUEUE',
-            'CONTAINER_INSIGHTS_DISABLED'
+            'CONTAINER_INSIGHTS_DISABLED', 'GUARDDUTY_ACCESS_ERROR',
+            'GUARDDUTY_REGION_ERROR', 'GUARDDUTY_CLIENT_ERROR',
+            'GUARDDUTY_GENERAL_ERROR'
         ]:
             categories['monitoring_gaps'].append(finding)
             
         # Operational Cleanup (lower impact - housekeeping items)
         elif finding_type in [
             'UNUSED_SECURITY_GROUP', 'OLD_ACCESS_KEY', 'INACTIVE_USER',
-            'OLD_PROGRAMMATIC_USER', 'NO_LIFECYCLE_POLICY'
+            'OLD_PROGRAMMATIC_USER', 'NO_LIFECYCLE_POLICY',
+            'NO_RECENT_THREATS', 'GUARDDUTY_NOT_SUPPORTED'
         ]:
             categories['operational_cleanup'].append(finding)
             
         # Configuration Drift (lowest impact - best practices)
         else:
+            # This includes any GuardDuty threat findings and unknown types
             categories['configuration_drift'].append(finding)
     
     # Calculate weighted score with logarithmic scaling
@@ -2100,3 +2115,224 @@ def export_findings_html(findings: List[SecurityFinding], filepath: str, show_ac
     
     with open(filepath, 'w', encoding='utf-8') as htmlfile:
         htmlfile.write(html_content) 
+
+
+async def audit_guardduty_findings(regions: List[str] = None, all_regions: bool = True, account: str = None) -> List[SecurityFinding]:
+    """Audit GuardDuty findings for security threats and vulnerabilities"""
+    findings = []
+    
+    try:
+        # Determine regions to check
+        if regions:
+            regions_to_check = regions
+        elif all_regions:
+            # Use common GuardDuty regions
+            regions_to_check = [
+                'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+                'eu-west-1', 'eu-west-2', 'eu-central-1', 'ap-southeast-1',
+                'ap-southeast-2', 'ap-northeast-1'
+            ]
+        else:
+            # Use current region
+            import boto3
+            session = boto3.Session()
+            current_region = session.region_name or 'us-east-1'
+            regions_to_check = [current_region]
+        
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
+        
+        for region in regions_to_check:
+            try:
+                async with session.client('guardduty', region_name=region) as guardduty_client:
+                    # List detectors in this region
+                    try:
+                        detectors_response = await guardduty_client.list_detectors()
+                        detector_ids = detectors_response.get('DetectorIds', [])
+                        
+                        if not detector_ids:
+                            # No GuardDuty detector in this region
+                            findings.append(SecurityFinding(
+                                resource_type='GuardDuty',
+                                resource_id=f'Region-{region}',
+                                finding_type='NO_GUARDDUTY_DETECTOR',
+                                severity='HIGH',
+                                description=f'GuardDuty is not enabled in region {region}',
+                                region=region,
+                                remediation=f'Enable GuardDuty in region {region} for threat detection',
+                                account=account
+                            ))
+                            continue
+                        
+                        # Process each detector
+                        for detector_id in detector_ids:
+                            try:
+                                # Get detector status
+                                detector_response = await guardduty_client.get_detector(DetectorId=detector_id)
+                                detector_status = detector_response.get('Status', 'UNKNOWN')
+                                
+                                if detector_status != 'ENABLED':
+                                    findings.append(SecurityFinding(
+                                        resource_type='GuardDuty',
+                                        resource_id=detector_id,
+                                        finding_type='GUARDDUTY_DETECTOR_DISABLED',
+                                        severity='HIGH',
+                                        description=f'GuardDuty detector {detector_id} is disabled in region {region}',
+                                        region=region,
+                                        remediation='Enable GuardDuty detector for threat detection',
+                                        account=account
+                                    ))
+                                    continue
+                                
+                                # List recent findings (last 30 days)
+                                from datetime import datetime, timedelta
+                                thirty_days_ago = int((datetime.now() - timedelta(days=30)).timestamp() * 1000)
+                                
+                                finding_criteria = {
+                                    'Criterion': {
+                                        'updatedAt': {
+                                            'GreaterThanOrEqual': thirty_days_ago
+                                        },
+                                        'service.archived': {
+                                            'Equals': ['false']
+                                        }
+                                    }
+                                }
+                                
+                                # Get finding IDs
+                                findings_response = await guardduty_client.list_findings(
+                                    DetectorId=detector_id,
+                                    FindingCriteria=finding_criteria,
+                                    MaxResults=50
+                                )
+                                
+                                finding_ids = findings_response.get('FindingIds', [])
+                                
+                                if finding_ids:
+                                    # Get detailed findings
+                                    detailed_findings_response = await guardduty_client.get_findings(
+                                        DetectorId=detector_id,
+                                        FindingIds=finding_ids
+                                    )
+                                    
+                                    guardduty_findings = detailed_findings_response.get('Findings', [])
+                                    
+                                    for gd_finding in guardduty_findings:
+                                        # Map GuardDuty severity to our severity levels
+                                        gd_severity = gd_finding.get('Severity', 0)
+                                        if gd_severity >= 7.0:
+                                            severity = 'HIGH'
+                                        elif gd_severity >= 4.0:
+                                            severity = 'MEDIUM'
+                                        else:
+                                            severity = 'LOW'
+                                        
+                                        # Extract resource information
+                                        resource = gd_finding.get('Resource', {})
+                                        resource_type = resource.get('ResourceType', 'Unknown')
+                                        
+                                        # Get resource ID from different resource types
+                                        resource_id = 'Unknown'
+                                        if 'InstanceDetails' in resource:
+                                            resource_id = resource['InstanceDetails'].get('InstanceId', 'Unknown')
+                                        elif 'AccessKeyDetails' in resource:
+                                            resource_id = resource['AccessKeyDetails'].get('AccessKeyId', 'Unknown')
+                                        elif 'S3BucketDetails' in resource:
+                                            buckets = resource['S3BucketDetails']
+                                            if buckets:
+                                                resource_id = buckets[0].get('Name', 'Unknown')
+                                        
+                                        # Create security finding
+                                        findings.append(SecurityFinding(
+                                            resource_type=f'GuardDuty-{resource_type}',
+                                            resource_id=resource_id,
+                                            finding_type=gd_finding.get('Type', 'UNKNOWN_THREAT'),
+                                            severity=severity,
+                                            description=gd_finding.get('Description', 'GuardDuty security finding'),
+                                            region=region,
+                                            remediation='Review GuardDuty finding details and take appropriate action',
+                                            account=account
+                                        ))
+                                
+                                else:
+                                    # No recent findings - this is actually good news
+                                    findings.append(SecurityFinding(
+                                        resource_type='GuardDuty',
+                                        resource_id=detector_id,
+                                        finding_type='NO_RECENT_THREATS',
+                                        severity='LOW',
+                                        description=f'GuardDuty detector {detector_id} found no threats in the last 30 days',
+                                        region=region,
+                                        remediation='Continue monitoring with GuardDuty',
+                                        account=account
+                                    ))
+                                
+                            except Exception as detector_error:
+                                # Error accessing specific detector
+                                findings.append(SecurityFinding(
+                                    resource_type='GuardDuty',
+                                    resource_id=detector_id,
+                                    finding_type='GUARDDUTY_ACCESS_ERROR',
+                                    severity='MEDIUM',
+                                    description=f'Unable to access GuardDuty detector {detector_id}: {str(detector_error)}',
+                                    region=region,
+                                    remediation='Check GuardDuty permissions and detector configuration',
+                                    account=account
+                                ))
+                        
+                    except Exception as region_error:
+                        # Error accessing GuardDuty in this region
+                        if 'not supported' in str(region_error).lower():
+                            # GuardDuty not supported in this region
+                            findings.append(SecurityFinding(
+                                resource_type='GuardDuty',
+                                resource_id=f'Region-{region}',
+                                finding_type='GUARDDUTY_NOT_SUPPORTED',
+                                severity='LOW',
+                                description=f'GuardDuty is not supported in region {region}',
+                                region=region,
+                                remediation='Use GuardDuty in supported regions',
+                                account=account
+                            ))
+                        else:
+                            findings.append(SecurityFinding(
+                                resource_type='GuardDuty',
+                                resource_id=f'Region-{region}',
+                                finding_type='GUARDDUTY_REGION_ERROR',
+                                severity='MEDIUM',
+                                description=f'Unable to access GuardDuty in region {region}: {str(region_error)}',
+                                region=region,
+                                remediation='Check GuardDuty permissions and region availability',
+                                account=account
+                            ))
+                            
+            except Exception as client_error:
+                # Error creating GuardDuty client for this region
+                findings.append(SecurityFinding(
+                    resource_type='GuardDuty',
+                    resource_id=f'Region-{region}',
+                    finding_type='GUARDDUTY_CLIENT_ERROR',
+                    severity='MEDIUM',
+                    description=f'Unable to create GuardDuty client for region {region}: {str(client_error)}',
+                    region=region,
+                    remediation='Check AWS credentials and GuardDuty service permissions',
+                    account=account
+                ))
+        
+    except Exception as e:
+        # General error
+        findings.append(SecurityFinding(
+            resource_type='GuardDuty',
+            resource_id='Global',
+            finding_type='GUARDDUTY_GENERAL_ERROR',
+            severity='MEDIUM',
+            description=f'General error accessing GuardDuty: {str(e)}',
+            region='global',
+            remediation='Check AWS credentials and GuardDuty service permissions',
+            account=account
+        ))
+    
+    return findings 

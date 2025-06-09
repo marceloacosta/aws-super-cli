@@ -43,16 +43,17 @@ class TestRegressionIssues:
         REGRESSION TEST: Empty error box appearing on CLI help
         
         Issue: Running 'aws-super-cli' without args showed empty error box
-        This is partially a Typer behavior but we ensure it's consistent
+        Fixed: Now shows helpful quick reference guide instead of just usage
         """
         result = self.runner.invoke(app, [])
         
-        # Should show usage info (this is expected Typer behavior)
-        assert "Usage:" in result.stdout
+        # Should show helpful content (new behavior is better than just "Usage:")
+        assert "AWS Super CLI - Quick Reference" in result.stdout
+        assert "Most Common Commands:" in result.stdout
         assert "aws-super-cli" in result.stdout
         
-        # Exit code 2 is expected for "missing command"
-        assert result.exit_code == 2
+        # Exit code 0 is expected for helpful content
+        assert result.exit_code == 0
     
     def test_messy_help_text_cleanup(self):
         """
@@ -287,7 +288,7 @@ class TestNetworkSecurityFeatures:
         assert "audit (s3, iam, network," in result.stdout, "Audit help should list network as available service"
 
     @patch('aws_super_cli.services.audit.run_security_audit')
-    @patch('aws_super_cli.services.audit.get_security_summary') 
+    @patch('aws_super_cli.services.audit.get_security_summary')
     def test_audit_services_help_mentions_compute(self, mock_summary, mock_audit):
         """
         REGRESSION TEST: Audit command help should mention compute service
@@ -298,7 +299,7 @@ class TestNetworkSecurityFeatures:
         assert result.exit_code == 0
         
         # Should mention compute in services help text
-        assert "compute)" in result.stdout, "Audit help should list compute as available service"
+        assert "compute" in result.stdout, "Audit help should list compute as available service"
 
 
 class TestComputeSecurityFeatures:
@@ -391,6 +392,123 @@ class TestComputeSecurityFeatures:
         assert 's3' in services, "S3 service should be included"
         assert 'compute' in services, "Compute service should be included"
         assert len(services) == 2, "Should only include the two specified services"
+
+
+class TestGuardDutyIntegrationRegression:
+    """Regression tests for GuardDuty integration functionality"""
+    
+    def setup_method(self):
+        self.runner = CliRunner()
+    
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
+    def test_guardduty_service_in_default_audit(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: Ensure GuardDuty service is included in default audit
+        
+        GuardDuty integration should be part of the default audit services
+        """
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 100,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--summary"])
+        assert result.exit_code == 0
+        
+        # Verify GuardDuty is in default services
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert 'guardduty' in services, "GuardDuty service should be in default audit services"
+    
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
+    def test_guardduty_only_audit_works(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: GuardDuty-only audit should work correctly
+        
+        Users should be able to audit only GuardDuty findings
+        """
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 100,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {'guardduty': 0}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--services", "guardduty", "--summary"])
+        assert result.exit_code == 0
+        
+        # Verify only GuardDuty was audited
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert services == ['guardduty'], "Only GuardDuty should be audited"
+    
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary')
+    def test_guardduty_audit_with_other_services(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: GuardDuty should work well with other audit services
+        
+        GuardDuty should integrate seamlessly with s3, iam, network, compute audits
+        """
+        mock_audit.return_value = []
+        mock_summary.return_value = {
+            'score': 85,
+            'total': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'services': {'s3': 0, 'guardduty': 0}
+        }
+        
+        result = self.runner.invoke(app, ["audit", "--services", "s3,guardduty", "--summary"])
+        assert result.exit_code == 0
+        
+        # Verify both services were audited
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        services = call_args.kwargs['services']
+        assert 's3' in services, "S3 should be audited"
+        assert 'guardduty' in services, "GuardDuty should be audited"
+    
+    def test_help_includes_guardduty_audit_examples(self):
+        """
+        REGRESSION TEST: Help command should mention GuardDuty audit capability
+        
+        Users should be able to discover GuardDuty audit functionality through help
+        """
+        result = self.runner.invoke(app, ["help"])
+        assert result.exit_code == 0
+        
+        # Should mention GuardDuty threat detection
+        assert "guardduty" in result.stdout.lower(), "Help should mention GuardDuty"
+        assert "threat detection" in result.stdout.lower(), "Help should mention threat detection"
+    
+    @patch('aws_super_cli.services.audit.run_security_audit')
+    @patch('aws_super_cli.services.audit.get_security_summary') 
+    def test_audit_services_help_mentions_guardduty(self, mock_summary, mock_audit):
+        """
+        REGRESSION TEST: Audit command help should list GuardDuty as available service
+        
+        --services help should include guardduty in the list
+        """
+        result = self.runner.invoke(app, ["audit", "--help"])
+        assert result.exit_code == 0
+        
+        # Should list GuardDuty as available service
+        assert "guardduty" in result.stdout, "Audit help should mention GuardDuty service"
+        assert "threats" in result.stdout.lower() or "guardduty" in result.stdout, "Should mention threat detection capability"
 
 
 if __name__ == "__main__":

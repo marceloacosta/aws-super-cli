@@ -11,7 +11,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="aws-super-cli",
-    version="0.13.3",
+    version="0.13.4",
     author="Marcelo Acosta",
     author_email="marcelo.acosta@latintradegroup.com",
     description="AWS Super CLI - Multi-account AWS resource discovery with service-level cost intelligence",

@@ -151,11 +151,12 @@ AWS Super CLI provides comprehensive security auditing across your AWS infrastru
 ### Basic Security Commands
 
 ```bash
-aws-super-cli audit                        # Comprehensive security audit (S3, IAM, Network)
+aws-super-cli audit                        # Comprehensive security audit (S3, IAM, Network, GuardDuty)
 aws-super-cli audit --summary              # Quick security overview with scoring
 aws-super-cli audit --all-accounts         # Security audit across all accounts
 aws-super-cli audit --services network     # Network security only
 aws-super-cli audit --services s3,iam      # S3 and IAM audit only
+aws-super-cli audit --services guardduty   # GuardDuty threat detection only
 ```
 
 ### Security Coverage
@@ -181,6 +182,14 @@ aws-super-cli audit --services s3,iam      # S3 and IAM audit only
 - Network ACL configuration analysis
 - VPC Flow Logs status verification
 - Subnet public IP auto-assignment analysis
+
+**GuardDuty Threat Detection:**
+- GuardDuty enablement status across all regions
+- Active threat findings and security events
+- Malicious activity detection (brute force, reconnaissance, data exfiltration)
+- Compromised credential identification
+- Botnet and cryptocurrency mining detection
+- Severity-based threat prioritization with actionable remediation
 
 ### Security Report Export
 
@@ -353,11 +362,14 @@ aws-super-cli audit --summary
 # Network security assessment only
 aws-super-cli audit --services network
 
+# GuardDuty threat detection only
+aws-super-cli audit --services guardduty
+
 # Multi-account security posture
 aws-super-cli audit --all-accounts --summary
 
 # Detailed security findings with remediation
-aws-super-cli audit --services s3,iam,network
+aws-super-cli audit --services s3,iam,network,guardduty
 ```
 
 **Resource discovery:**

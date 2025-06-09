@@ -1084,7 +1084,7 @@ def accounts_dashboard():
 
 @app.command()
 def audit(
-    services: Optional[str] = typer.Option("s3,iam,network,compute", "--services", help="Comma-separated services to audit (s3, iam, network, compute)"),
+    services: Optional[str] = typer.Option("s3,iam,network,compute,guardduty", "--services", help="Comma-separated services to audit (s3, iam, network, compute, guardduty)"),
     region: Optional[str] = typer.Option(None, "--region", "-r", help="Specific region to query"),
     all_regions: bool = typer.Option(True, "--all-regions/--no-all-regions", help="Query all regions (default) or current region only"),
     all_accounts: bool = typer.Option(False, "--all-accounts", help="Query all accessible AWS accounts"),
@@ -1093,7 +1093,7 @@ def audit(
     export_format: Optional[str] = typer.Option(None, "--export", help="Export format: csv, txt, html"),
     output_file: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path (default: auto-generated)"),
 ):
-    """Run security audit to identify misconfigurations"""
+    """Run security audit to identify misconfigurations and threats (includes GuardDuty findings)"""
     
     # Parse services
     service_list = [s.strip().lower() for s in services.split(',')]
@@ -1299,6 +1299,7 @@ def help_command():
         print("  aws-super-cli audit --all-accounts      # Audit all accounts")
         print("  aws-super-cli audit --services network  # Network security only")
         print("  aws-super-cli audit --services s3,iam   # S3 and IAM audit only")
+        print("  aws-super-cli audit --services guardduty # GuardDuty threat detection")
         print("  aws-super-cli audit --export csv        # Export results to CSV")
         print("  aws-super-cli audit --export html       # Export results to HTML")
         print("  aws-super-cli audit --export txt -o report.txt # Export to specific file")
@@ -1350,6 +1351,7 @@ def help_command():
         safe_print("  [cyan]aws-super-cli audit --all-accounts[/cyan]      # Audit all accounts")
         safe_print("  [cyan]aws-super-cli audit --services network[/cyan]  # Network security only")
         safe_print("  [cyan]aws-super-cli audit --services s3,iam[/cyan]   # S3 and IAM audit only")
+        safe_print("  [cyan]aws-super-cli audit --services guardduty[/cyan] # GuardDuty threat detection")
         safe_print("  [cyan]aws-super-cli audit --export csv[/cyan]        # Export results to CSV")
         safe_print("  [cyan]aws-super-cli audit --export html[/cyan]       # Export results to HTML")
         safe_print("  [cyan]aws-super-cli audit --export txt -o report.txt[/cyan] # Export to specific file")
