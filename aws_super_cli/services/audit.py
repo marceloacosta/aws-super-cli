@@ -678,7 +678,7 @@ async def run_security_audit(
     all_findings = []
     
     if not services:
-        services = ['s3', 'iam', 'network', 'compute', 'guardduty', 'config', 'cloudtrail', 'rds']  # Default services to audit
+        services = ['s3', 'iam', 'network', 'compute', 'guardduty', 'config', 'cloudtrail', 'rds', 'cloudwatch']  # Default services to audit
     
     console = Console()
     
@@ -690,7 +690,8 @@ async def run_security_audit(
     else:
         # Multi-account mode
         profiles_to_audit = profiles
-        console.print(f"[dim]Running security audit on {len(profiles)} accounts: {', '.join(profiles)}[/dim]")
+        profile_names = [p for p in profiles if p is not None]
+        console.print(f"[dim]Running security audit on {len(profile_names)} accounts: {', '.join(profile_names)}[/dim]")
     
     # Audit each profile
     for profile in profiles_to_audit:
@@ -787,6 +788,16 @@ async def run_security_audit(
                     if profile:
                         finding.account = profile
                 all_findings.extend(rds_findings)
+            
+            # Run CloudWatch audit if requested
+            if 'cloudwatch' in services:
+                console.print(f"[dim]Auditing CloudWatch alarm coverage in {profile_display}...[/dim]")
+                cloudwatch_findings = await audit_cloudwatch_alarms(regions, all_regions, profile)
+                # Add profile info to findings
+                for finding in cloudwatch_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(cloudwatch_findings)
     
     return all_findings
 
@@ -886,7 +897,10 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
             'GUARDDUTY_REGION_ERROR', 'GUARDDUTY_CLIENT_ERROR',
             'GUARDDUTY_GENERAL_ERROR', 'NO_GLOBAL_CLOUDTRAIL', 'NO_REGIONAL_CLOUDTRAIL',
             'NO_GLOBAL_SERVICE_EVENTS', 'CLOUDTRAIL_NOT_LOGGING', 'NO_MANAGEMENT_EVENTS',
-            'NO_DATA_EVENTS', 'CLOUDTRAIL_DELIVERY_ERROR', 'RDS_CLUSTER_NO_CLOUDWATCH_LOGS'
+            'NO_DATA_EVENTS', 'CLOUDTRAIL_DELIVERY_ERROR', 'RDS_CLUSTER_NO_CLOUDWATCH_LOGS',
+            'EC2_NO_MONITORING', 'RDS_NO_MONITORING', 'ELB_NO_MONITORING', 
+            'LOW_ALARM_COVERAGE', 'INSUFFICIENT_MONITORING_COVERAGE',
+            'HIGH_INSUFFICIENT_DATA_ALARMS', 'NO_ALARM_NOTIFICATIONS'
         ]:
             categories['monitoring_gaps'].append(finding)
             
@@ -897,14 +911,21 @@ def _calculate_enhanced_security_score(findings: List[SecurityFinding]) -> int:
             'NO_RECENT_THREATS', 'GUARDDUTY_NOT_SUPPORTED',
             'CLOUDTRAIL_NOT_SUPPORTED', 'CLOUDTRAIL_ACCESS_ERROR',
             'CLOUDTRAIL_REGION_ERROR', 'CLOUDTRAIL_GENERAL_ERROR',
-            'EXCESSIVE_DATA_EVENT_LOGGING', 'RDS_NO_AUTO_MINOR_VERSION_UPGRADE', 'RDS_DEFAULT_PARAMETER_GROUP'
+            'EXCESSIVE_DATA_EVENT_LOGGING', 'RDS_NO_AUTO_MINOR_VERSION_UPGRADE', 'RDS_DEFAULT_PARAMETER_GROUP',
+            'LAMBDA_NO_MONITORING', 'CLOUDWATCH_ACCESS_ERROR', 'CLOUDWATCH_REGION_ERROR'
         ]:
             categories['operational_cleanup'].append(finding)
             
         # Configuration Drift (lowest impact - best practices)
         else:
-            # This includes any GuardDuty threat findings and unknown types
-            categories['configuration_drift'].append(finding)
+            # This includes any GuardDuty threat findings, unknown types, and critical monitoring failures
+            if finding_type == 'NO_MONITORING_CONFIGURED':
+                # Critical monitoring failure gets higher penalty
+                categories['monitoring_gaps'].append(finding)
+            elif finding_type == 'CLOUDWATCH_GENERAL_ERROR':
+                categories['operational_cleanup'].append(finding)
+            else:
+                categories['configuration_drift'].append(finding)
     
     # Calculate weighted score with logarithmic scaling
     base_score = 100
@@ -2990,6 +3011,343 @@ async def audit_cloudtrail_coverage(regions: List[str] = None, all_regions: bool
             description=f'General error accessing CloudTrail: {str(e)}',
             region='global',
             remediation='Check AWS credentials and CloudTrail service permissions',
+            account=account
+        ))
+    
+    return findings
+
+
+async def audit_cloudwatch_alarms(regions: List[str] = None, all_regions: bool = True, account: str = None) -> List[SecurityFinding]:
+    """Audit CloudWatch alarm coverage for monitoring gaps and operational visibility
+    
+    This function analyzes CloudWatch alarms to detect monitoring coverage gaps across
+    critical AWS infrastructure components. It identifies missing alarms for essential
+    metrics and provides recommendations for improving operational visibility.
+    """
+    findings = []
+    
+    try:
+        # Determine regions to check
+        if regions:
+            regions_to_check = regions
+        elif all_regions:
+            # Use common AWS regions for alarm coverage analysis
+            regions_to_check = [
+                'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+                'eu-west-1', 'eu-west-2', 'eu-central-1', 'ap-southeast-1',
+                'ap-southeast-2', 'ap-northeast-1', 'ca-central-1'
+            ]
+        else:
+            # Use current region
+            import boto3
+            session = boto3.Session()
+            current_region = session.region_name or 'us-east-1'
+            regions_to_check = [current_region]
+        
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
+        
+        # Track resources and their alarm coverage across regions
+        monitored_resources = {
+            'ec2_instances': set(),
+            'rds_instances': set(),
+            'lambda_functions': set(),
+            'elb_load_balancers': set(),
+            'dynamodb_tables': set(),
+            'sns_topics': set(),
+            'sqs_queues': set()
+        }
+        
+        # Track existing alarms by resource
+        existing_alarms = {
+            'ec2': set(),
+            'rds': set(),
+            'lambda': set(),
+            'elb': set(),
+            'dynamodb': set(),
+            'sns': set(),
+            'sqs': set()
+        }
+        
+        total_alarms = 0
+        active_alarms = 0
+        insufficient_alarms = 0
+        
+        # Analyze each region for alarm coverage
+        for region in regions_to_check:
+            try:
+                # Get CloudWatch alarms in this region
+                async with session.client('cloudwatch', region_name=region) as cw_client:
+                    try:
+                        # Get all alarms in the region
+                        alarms_response = await cw_client.describe_alarms()
+                        alarms = alarms_response.get('MetricAlarms', [])
+                        total_alarms += len(alarms)
+                        
+                        # Analyze alarm states and coverage
+                        ok_alarms = 0
+                        alarm_alarms = 0
+                        insufficient_data_alarms = 0
+                        
+                        for alarm in alarms:
+                            alarm_name = alarm.get('AlarmName', 'Unknown')
+                            alarm_state = alarm.get('StateValue', 'UNKNOWN')
+                            namespace = alarm.get('Namespace', '')
+                            dimensions = alarm.get('Dimensions', [])
+                            
+                            # Count alarm states
+                            if alarm_state == 'OK':
+                                ok_alarms += 1
+                                active_alarms += 1
+                            elif alarm_state == 'ALARM':
+                                alarm_alarms += 1
+                                active_alarms += 1
+                            elif alarm_state == 'INSUFFICIENT_DATA':
+                                insufficient_data_alarms += 1
+                                insufficient_alarms += 1
+                            
+                            # Track which resources have monitoring
+                            for dimension in dimensions:
+                                dim_name = dimension.get('Name', '')
+                                dim_value = dimension.get('Value', '')
+                                
+                                if namespace == 'AWS/EC2' and dim_name == 'InstanceId':
+                                    existing_alarms['ec2'].add(dim_value)
+                                elif namespace == 'AWS/RDS' and dim_name == 'DBInstanceIdentifier':
+                                    existing_alarms['rds'].add(dim_value)
+                                elif namespace == 'AWS/Lambda' and dim_name == 'FunctionName':
+                                    existing_alarms['lambda'].add(dim_value)
+                                elif namespace in ['AWS/ELB', 'AWS/ApplicationELB', 'AWS/NetworkELB'] and dim_name in ['LoadBalancerName', 'LoadBalancer']:
+                                    existing_alarms['elb'].add(dim_value)
+                                elif namespace == 'AWS/DynamoDB' and dim_name == 'TableName':
+                                    existing_alarms['dynamodb'].add(dim_value)
+                                elif namespace == 'AWS/SNS' and dim_name == 'TopicName':
+                                    existing_alarms['sns'].add(dim_value)
+                                elif namespace == 'AWS/SQS' and dim_name == 'QueueName':
+                                    existing_alarms['sqs'].add(dim_value)
+                        
+                        # Check for high number of insufficient data alarms
+                        if insufficient_data_alarms > 10:
+                            findings.append(SecurityFinding(
+                                resource_type='CloudWatch',
+                                resource_id=f'Region-{region}',
+                                finding_type='HIGH_INSUFFICIENT_DATA_ALARMS',
+                                severity='MEDIUM',
+                                description=f'{insufficient_data_alarms} alarms in INSUFFICIENT_DATA state in {region} - potential monitoring issues',
+                                region=region,
+                                remediation='Review alarm configurations and ensure metrics are being generated properly',
+                                account=account
+                            ))
+                        
+                        # Check for regions with very few alarms
+                        if len(alarms) < 5:
+                            findings.append(SecurityFinding(
+                                resource_type='CloudWatch',
+                                resource_id=f'Region-{region}',
+                                finding_type='LOW_ALARM_COVERAGE',
+                                severity='MEDIUM',
+                                description=f'Only {len(alarms)} CloudWatch alarms configured in {region} - potential monitoring gap',
+                                region=region,
+                                remediation='Consider adding more comprehensive monitoring for critical resources',
+                                account=account
+                            ))
+                    
+                    except Exception as alarm_error:
+                        findings.append(SecurityFinding(
+                            resource_type='CloudWatch',
+                            resource_id=f'Region-{region}',
+                            finding_type='CLOUDWATCH_ACCESS_ERROR',
+                            severity='MEDIUM',
+                            description=f'Unable to access CloudWatch alarms in {region}: {str(alarm_error)}',
+                            region=region,
+                            remediation='Check AWS credentials and CloudWatch permissions',
+                            account=account
+                        ))
+                        continue
+                
+                # Get EC2 instances and check for missing alarms
+                try:
+                    async with session.client('ec2', region_name=region) as ec2_client:
+                        instances_response = await ec2_client.describe_instances()
+                        
+                        for reservation in instances_response.get('Reservations', []):
+                            for instance in reservation.get('Instances', []):
+                                instance_id = instance.get('InstanceId', '')
+                                instance_state = instance.get('State', {}).get('Name', '')
+                                
+                                if instance_state == 'running':
+                                    monitored_resources['ec2_instances'].add(instance_id)
+                                    
+                                    # Check if this instance has alarms
+                                    if instance_id not in existing_alarms['ec2']:
+                                        findings.append(SecurityFinding(
+                                            resource_type='CloudWatch',
+                                            resource_id=instance_id,
+                                            finding_type='EC2_NO_MONITORING',
+                                            severity='MEDIUM',
+                                            description=f'EC2 instance {instance_id} has no CloudWatch alarms configured',
+                                            region=region,
+                                            remediation='Add CloudWatch alarms for CPU utilization, disk usage, and network metrics',
+                                            account=account
+                                        ))
+                except Exception:
+                    # Skip EC2 check if access denied
+                    pass
+                
+                # Get RDS instances and check for missing alarms
+                try:
+                    async with session.client('rds', region_name=region) as rds_client:
+                        rds_response = await rds_client.describe_db_instances()
+                        
+                        for instance in rds_response.get('DBInstances', []):
+                            instance_id = instance.get('DBInstanceIdentifier', '')
+                            instance_status = instance.get('DBInstanceStatus', '')
+                            
+                            if instance_status == 'available':
+                                monitored_resources['rds_instances'].add(instance_id)
+                                
+                                # Check if this RDS instance has alarms
+                                if instance_id not in existing_alarms['rds']:
+                                    findings.append(SecurityFinding(
+                                        resource_type='CloudWatch',
+                                        resource_id=instance_id,
+                                        finding_type='RDS_NO_MONITORING',
+                                        severity='MEDIUM',
+                                        description=f'RDS instance {instance_id} has no CloudWatch alarms configured',
+                                        region=region,
+                                        remediation='Add CloudWatch alarms for CPU utilization, connections, and read/write latency',
+                                        account=account
+                                    ))
+                except Exception:
+                    # Skip RDS check if access denied
+                    pass
+                
+                # Get Lambda functions and check for missing alarms
+                try:
+                    async with session.client('lambda', region_name=region) as lambda_client:
+                        lambda_response = await lambda_client.list_functions()
+                        
+                        for function in lambda_response.get('Functions', []):
+                            function_name = function.get('FunctionName', '')
+                            
+                            monitored_resources['lambda_functions'].add(function_name)
+                            
+                            # Check if this Lambda function has alarms
+                            if function_name not in existing_alarms['lambda']:
+                                findings.append(SecurityFinding(
+                                    resource_type='CloudWatch',
+                                    resource_id=function_name,
+                                    finding_type='LAMBDA_NO_MONITORING',
+                                    severity='LOW',
+                                    description=f'Lambda function {function_name} has no CloudWatch alarms configured',
+                                    region=region,
+                                    remediation='Consider adding alarms for error rate, duration, and throttles',
+                                    account=account
+                                ))
+                except Exception:
+                    # Skip Lambda check if access denied
+                    pass
+                
+                # Get Load Balancers and check for missing alarms
+                try:
+                    async with session.client('elbv2', region_name=region) as elbv2_client:
+                        elb_response = await elbv2_client.describe_load_balancers()
+                        
+                        for lb in elb_response.get('LoadBalancers', []):
+                            lb_arn = lb.get('LoadBalancerArn', '')
+                            lb_name = lb.get('LoadBalancerName', '')
+                            
+                            if lb_name:
+                                monitored_resources['elb_load_balancers'].add(lb_name)
+                                
+                                # Check if this load balancer has alarms
+                                if lb_name not in existing_alarms['elb'] and lb_arn not in existing_alarms['elb']:
+                                    findings.append(SecurityFinding(
+                                        resource_type='CloudWatch',
+                                        resource_id=lb_name,
+                                        finding_type='ELB_NO_MONITORING',
+                                        severity='MEDIUM',
+                                        description=f'Load balancer {lb_name} has no CloudWatch alarms configured',
+                                        region=region,
+                                        remediation='Add CloudWatch alarms for target response time, error rates, and healthy host count',
+                                        account=account
+                                    ))
+                except Exception:
+                    # Skip ELB check if access denied
+                    pass
+                    
+            except Exception as region_error:
+                findings.append(SecurityFinding(
+                    resource_type='CloudWatch',
+                    resource_id=f'Region-{region}',
+                    finding_type='CLOUDWATCH_REGION_ERROR',
+                    severity='MEDIUM',
+                    description=f'Unable to analyze CloudWatch in region {region}: {str(region_error)}',
+                    region=region,
+                    remediation='Check AWS credentials and service permissions for this region',
+                    account=account
+                ))
+        
+        # Global monitoring assessment
+        total_resources = (len(monitored_resources['ec2_instances']) + 
+                          len(monitored_resources['rds_instances']) + 
+                          len(monitored_resources['lambda_functions']) + 
+                          len(monitored_resources['elb_load_balancers']))
+        
+        if total_resources > 10 and total_alarms < (total_resources * 0.3):
+            findings.append(SecurityFinding(
+                resource_type='CloudWatch',
+                resource_id='Global',
+                finding_type='INSUFFICIENT_MONITORING_COVERAGE',
+                severity='MEDIUM',
+                description=f'Low alarm-to-resource ratio: {total_alarms} alarms for {total_resources} resources (<30% coverage)',
+                region='global',
+                remediation='Implement comprehensive monitoring strategy with alarms for critical metrics',
+                account=account
+            ))
+        
+        # Check for lack of any monitoring
+        if total_alarms == 0 and total_resources > 0:
+            findings.append(SecurityFinding(
+                resource_type='CloudWatch',
+                resource_id='Global',
+                finding_type='NO_MONITORING_CONFIGURED',
+                severity='HIGH',
+                description=f'No CloudWatch alarms configured across {total_resources} resources',
+                region='global',
+                remediation='Implement basic monitoring with CloudWatch alarms for critical resources',
+                account=account
+            ))
+        
+        # Check for missing SNS notification endpoints
+        if total_alarms > insufficient_alarms:
+            # Check if we have any SNS topics for alarm notifications
+            sns_topics_found = len(monitored_resources['sns_topics']) > 0
+            if not sns_topics_found and total_alarms > 5:
+                findings.append(SecurityFinding(
+                    resource_type='CloudWatch',
+                    resource_id='Global',
+                    finding_type='NO_ALARM_NOTIFICATIONS',
+                    severity='MEDIUM',
+                    description=f'{total_alarms} alarms configured but no SNS topics found for notifications',
+                    region='global',
+                    remediation='Configure SNS topics and alarm actions to ensure notifications reach the right team',
+                    account=account
+                ))
+        
+    except Exception as e:
+        # General error
+        findings.append(SecurityFinding(
+            resource_type='CloudWatch',
+            resource_id='Global',
+            finding_type='CLOUDWATCH_GENERAL_ERROR',
+            severity='MEDIUM',
+            description=f'General error accessing CloudWatch: {str(e)}',
+            region='global',
+            remediation='Check AWS credentials and CloudWatch service permissions',
             account=account
         ))
     

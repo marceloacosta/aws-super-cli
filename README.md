@@ -160,13 +160,14 @@ AWS Super CLI provides comprehensive security auditing across your AWS infrastru
 ### Basic Security Commands
 
 ```bash
-aws-super-cli audit                        # Comprehensive security audit (S3, IAM, Network, GuardDuty, Config, CloudTrail)
+aws-super-cli audit                        # Comprehensive security audit (S3, IAM, Network, GuardDuty, Config, CloudTrail, CloudWatch)
 aws-super-cli audit --summary              # Quick security overview with scoring
 aws-super-cli audit --all-accounts         # Security audit across all accounts
 aws-super-cli audit --services network     # Network security only
 aws-super-cli audit --services s3,iam      # S3 and IAM audit only
 aws-super-cli audit --services guardduty   # GuardDuty threat detection only
 aws-super-cli audit --services cloudtrail  # CloudTrail logging coverage only
+aws-super-cli audit --services cloudwatch  # CloudWatch alarm coverage only
 ```
 
 ### Security Coverage
@@ -225,6 +226,15 @@ aws-super-cli audit --services cloudtrail  # CloudTrail logging coverage only
 - Performance Insights encryption with customer-managed KMS keys
 - Aurora cluster CloudWatch logs export configuration
 - Default parameter group usage identification
+
+**CloudWatch Alarm Coverage:**
+- Monitoring coverage analysis across EC2, RDS, Lambda, and ELB resources
+- Missing alarm detection for critical infrastructure components
+- Alarm state analysis (OK, ALARM, INSUFFICIENT_DATA)
+- Regional monitoring gap identification
+- SNS notification endpoint verification for alarm actions
+- Monitoring-to-resource ratio assessment for comprehensive coverage
+- Operational visibility recommendations for improved incident response
 
 ### Security Report Export
 
@@ -341,6 +351,7 @@ Top Services by Credit Usage
 | Lambda | `aws-super-cli ls lambda` | ✅ | ✅ | N/A | ✅ |
 | ELB | `aws-super-cli ls elb` | ✅ | ✅ | N/A | ✅ |
 | IAM | `aws-super-cli ls iam` | ✅ | ✅ | N/A | ✅ |
+| CloudWatch | `aws-super-cli audit --services cloudwatch` | ✅ | ✅ | N/A | N/A |
 
 ## Multi-Account Support
 
