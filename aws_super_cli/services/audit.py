@@ -678,7 +678,7 @@ async def run_security_audit(
     all_findings = []
     
     if not services:
-        services = ['s3', 'iam', 'network', 'compute', 'guardduty']  # Default services to audit
+        services = ['s3', 'iam', 'network', 'compute', 'guardduty', 'config']  # Default services to audit
     
     console = Console()
     
@@ -757,6 +757,16 @@ async def run_security_audit(
                     if profile:
                         finding.account = profile
                 all_findings.extend(guardduty_findings)
+            
+            # Run AWS Config audit if requested
+            if 'config' in services:
+                console.print(f"[dim]Auditing AWS Config compliance in {profile_display}...[/dim]")
+                config_findings = await audit_aws_config(regions, all_regions, profile)
+                # Add profile info to findings
+                for finding in config_findings:
+                    if profile:
+                        finding.account = profile
+                all_findings.extend(config_findings)
     
     return all_findings
 
@@ -2336,3 +2346,302 @@ async def audit_guardduty_findings(regions: List[str] = None, all_regions: bool 
         ))
     
     return findings 
+
+
+async def audit_aws_config(regions: List[str] = None, all_regions: bool = True, account: str = None) -> List[SecurityFinding]:
+    """Audit AWS Config enablement and compliance checking across regions"""
+    findings = []
+    
+    try:
+        # Determine regions to check
+        if regions:
+            regions_to_check = regions
+        elif all_regions:
+            # Use common AWS regions
+            regions_to_check = [
+                'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+                'eu-west-1', 'eu-west-2', 'eu-central-1', 'ap-southeast-1',
+                'ap-southeast-2', 'ap-northeast-1'
+            ]
+        else:
+            # Use current region
+            import boto3
+            session = boto3.Session()
+            current_region = session.region_name or 'us-east-1'
+            regions_to_check = [current_region]
+        
+        # Create session with the provided account/profile
+        if account:
+            session = aioboto3.Session(profile_name=account)
+        else:
+            session = aioboto3.Session()
+        
+        for region in regions_to_check:
+            try:
+                async with session.client('config', region_name=region) as config_client:
+                    # Check configuration recorders
+                    try:
+                        recorders_response = await config_client.describe_configuration_recorders()
+                        recorders = recorders_response.get('ConfigurationRecorders', [])
+                        
+                        if not recorders:
+                            # No Config recorders in this region
+                            findings.append(SecurityFinding(
+                                resource_type='Config',
+                                resource_id=f'Region-{region}',
+                                finding_type='CONFIG_DISABLED',
+                                severity='HIGH',
+                                description=f'AWS Config is not enabled in region {region}',
+                                region=region,
+                                remediation=f'Enable AWS Config in region {region} for compliance tracking',
+                                account=account
+                            ))
+                            continue
+                        
+                        # Check each configuration recorder
+                        for recorder in recorders:
+                            recorder_name = recorder.get('name', 'Unknown')
+                            recording_group = recorder.get('recordingGroup', {})
+                            
+                            # Check if recorder is recording all resources
+                            all_supported = recording_group.get('allSupported', False)
+                            include_global_resources = recording_group.get('includeGlobalResourceTypes', False)
+                            
+                            if not all_supported:
+                                findings.append(SecurityFinding(
+                                    resource_type='Config',
+                                    resource_id=recorder_name,
+                                    finding_type='INCOMPLETE_RECORDING',
+                                    severity='MEDIUM',
+                                    description=f'Config recorder {recorder_name} is not recording all supported resources',
+                                    region=region,
+                                    remediation='Configure Config to record all supported resource types',
+                                    account=account
+                                ))
+                            
+                            if not include_global_resources and region == 'us-east-1':
+                                findings.append(SecurityFinding(
+                                    resource_type='Config',
+                                    resource_id=recorder_name,
+                                    finding_type='NO_GLOBAL_RESOURCES',
+                                    severity='MEDIUM',
+                                    description=f'Config recorder {recorder_name} is not recording global resources',
+                                    region=region,
+                                    remediation='Enable global resource recording in us-east-1 region',
+                                    account=account
+                                ))
+                            
+                            # Check recorder status
+                            try:
+                                status_response = await config_client.describe_configuration_recorder_status(
+                                    ConfigurationRecorderNames=[recorder_name]
+                                )
+                                statuses = status_response.get('ConfigurationRecordersStatus', [])
+                                
+                                for status in statuses:
+                                    recording = status.get('recording', False)
+                                    if not recording:
+                                        findings.append(SecurityFinding(
+                                            resource_type='Config',
+                                            resource_id=recorder_name,
+                                            finding_type='CONFIG_RECORDER_STOPPED',
+                                            severity='HIGH',
+                                            description=f'Config recorder {recorder_name} is not recording',
+                                            region=region,
+                                            remediation='Start the Config recorder to enable compliance monitoring',
+                                            account=account
+                                        ))
+                                    
+                                    # Check for recent failures
+                                    last_error_code = status.get('lastErrorCode')
+                                    if last_error_code:
+                                        findings.append(SecurityFinding(
+                                            resource_type='Config',
+                                            resource_id=recorder_name,
+                                            finding_type='CONFIG_RECORDER_ERROR',
+                                            severity='MEDIUM',
+                                            description=f'Config recorder {recorder_name} has error: {last_error_code}',
+                                            region=region,
+                                            remediation='Check Config recorder permissions and configuration',
+                                            account=account
+                                        ))
+                            except Exception as status_error:
+                                findings.append(SecurityFinding(
+                                    resource_type='Config',
+                                    resource_id=recorder_name,
+                                    finding_type='CONFIG_STATUS_ERROR',
+                                    severity='MEDIUM',
+                                    description=f'Unable to check Config recorder status: {str(status_error)}',
+                                    region=region,
+                                    remediation='Check Config service permissions',
+                                    account=account
+                                ))
+                    except Exception as recorders_error:
+                        # Error checking configuration recorders
+                        findings.append(SecurityFinding(
+                            resource_type='Config',
+                            resource_id=f'Region-{region}',
+                            finding_type='CONFIG_RECORDERS_ERROR',
+                            severity='MEDIUM',
+                            description=f'Unable to check Config recorders in region {region}: {str(recorders_error)}',
+                            region=region,
+                            remediation='Check Config service permissions and availability',
+                            account=account
+                        ))
+                    
+                    # Check delivery channels
+                    try:
+                        channels_response = await config_client.describe_delivery_channels()
+                        channels = channels_response.get('DeliveryChannels', [])
+                        
+                        if not channels:
+                            findings.append(SecurityFinding(
+                                resource_type='Config',
+                                resource_id=f'Region-{region}',
+                                finding_type='NO_DELIVERY_CHANNEL',
+                                severity='HIGH',
+                                description=f'AWS Config has no delivery channel configured in region {region}',
+                                region=region,
+                                remediation='Configure S3 delivery channel for Config to store configuration snapshots',
+                                account=account
+                            ))
+                        else:
+                            # Check delivery channel status
+                            for channel in channels:
+                                channel_name = channel.get('name', 'Unknown')
+                                s3_bucket = channel.get('s3BucketName')
+                                
+                                try:
+                                    delivery_status_response = await config_client.describe_delivery_channel_status(
+                                        DeliveryChannelNames=[channel_name]
+                                    )
+                                    statuses = delivery_status_response.get('DeliveryChannelsStatus', [])
+                                    
+                                    for status in statuses:
+                                        last_error_code = status.get('configSnapshotDeliveryInfo', {}).get('lastErrorCode')
+                                        if last_error_code:
+                                            findings.append(SecurityFinding(
+                                                resource_type='Config',
+                                                resource_id=channel_name,
+                                                finding_type='CONFIG_DELIVERY_ERROR',
+                                                severity='MEDIUM',
+                                                description=f'Config delivery channel {channel_name} has delivery error: {last_error_code}',
+                                                region=region,
+                                                remediation='Check S3 bucket permissions and Config service role',
+                                                account=account
+                                            ))
+                                except Exception:
+                                    continue
+                    except Exception:
+                        # Delivery channel check failed
+                        pass
+                    
+                    # Check compliance rules if Config is enabled
+                    if recorders:
+                        try:
+                            rules_response = await config_client.describe_config_rules()
+                            rules = rules_response.get('ConfigRules', [])
+                            
+                            if not rules:
+                                findings.append(SecurityFinding(
+                                    resource_type='Config',
+                                    resource_id=f'Region-{region}',
+                                    finding_type='NO_COMPLIANCE_RULES',
+                                    severity='MEDIUM',
+                                    description=f'AWS Config has no compliance rules configured in region {region}',
+                                    region=region,
+                                    remediation='Configure AWS Config rules for security and compliance monitoring',
+                                    account=account
+                                ))
+                            else:
+                                # Check for inactive rules
+                                inactive_rules = []
+                                for rule in rules:
+                                    rule_name = rule.get('ConfigRuleName', 'Unknown')
+                                    rule_state = rule.get('ConfigRuleState', 'UNKNOWN')
+                                    
+                                    if rule_state != 'ACTIVE':
+                                        inactive_rules.append(rule_name)
+                                
+                                if inactive_rules:
+                                    findings.append(SecurityFinding(
+                                        resource_type='Config',
+                                        resource_id=f'Rules-{region}',
+                                        finding_type='INACTIVE_COMPLIANCE_RULES',
+                                        severity='MEDIUM',
+                                        description=f'AWS Config has {len(inactive_rules)} inactive compliance rules in region {region}',
+                                        region=region,
+                                        remediation='Activate Config rules for comprehensive compliance monitoring',
+                                        account=account
+                                    ))
+                                
+                                # Check compliance status for active rules
+                                try:
+                                    compliance_response = await config_client.describe_compliance_by_config_rule()
+                                    compliance_results = compliance_response.get('ComplianceByConfigRules', [])
+                                    
+                                    non_compliant_count = 0
+                                    for compliance in compliance_results:
+                                        rule_compliance = compliance.get('Compliance', {})
+                                        compliance_type = rule_compliance.get('ComplianceType', 'UNKNOWN')
+                                        
+                                        if compliance_type == 'NON_COMPLIANT':
+                                            non_compliant_count += 1
+                                    
+                                    if non_compliant_count > 0:
+                                        findings.append(SecurityFinding(
+                                            resource_type='Config',
+                                            resource_id=f'Compliance-{region}',
+                                            finding_type='NON_COMPLIANT_RESOURCES',
+                                            severity='HIGH',
+                                            description=f'AWS Config found {non_compliant_count} non-compliant rules in region {region}',
+                                            region=region,
+                                            remediation='Review and remediate non-compliant resources identified by Config rules',
+                                            account=account
+                                        ))
+                                except Exception:
+                                    # Compliance check failed - not critical
+                                    pass
+                        except Exception:
+                            # Rules check failed - not critical  
+                            pass
+                            
+            except Exception as client_error:
+                # Error creating Config client for this region
+                if 'not supported' in str(client_error).lower():
+                    findings.append(SecurityFinding(
+                        resource_type='Config',
+                        resource_id=f'Region-{region}',
+                        finding_type='CONFIG_NOT_SUPPORTED',
+                        severity='LOW',
+                        description=f'AWS Config is not supported in region {region}',
+                        region=region,
+                        remediation='Use AWS Config in supported regions',
+                        account=account
+                    ))
+                else:
+                    findings.append(SecurityFinding(
+                        resource_type='Config',
+                        resource_id=f'Region-{region}',
+                        finding_type='CONFIG_CLIENT_ERROR',
+                        severity='MEDIUM',
+                        description=f'Unable to access AWS Config in region {region}: {str(client_error)}',
+                        region=region,
+                        remediation='Check AWS credentials and Config service permissions',
+                        account=account
+                    ))
+        
+    except Exception as e:
+        # General error
+        findings.append(SecurityFinding(
+            resource_type='Config',
+            resource_id='Global',
+            finding_type='CONFIG_GENERAL_ERROR',
+            severity='MEDIUM',
+            description=f'General error accessing AWS Config: {str(e)}',
+            region='global',
+            remediation='Check AWS credentials and Config service permissions',
+            account=account
+        ))
+    
+    return findings
