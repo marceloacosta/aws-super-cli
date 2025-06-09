@@ -43,14 +43,14 @@ class TestCLICommands:
     def test_main_help_clean_output(self):
         """Test that main help (no args) shows clean output"""
         result = self.runner.invoke(app, [])
-        assert result.exit_code == 2  # Typer's no-args behavior
+        assert result.exit_code == 0  # Fixed: Now shows help cleanly without error
         
         # Should show clean command list
-        assert "AWS Super CLI" in result.stdout
-        assert "Commands" in result.stdout
-        assert "ls" in result.stdout
-        assert "audit" in result.stdout
-        assert "cost" in result.stdout
+        assert "AWS Super CLI - Quick Reference" in result.stdout  # Updated to match actual output
+        assert "Most Common Commands:" in result.stdout
+        assert "aws-super-cli ls ec2" in result.stdout
+        assert "aws-super-cli audit" in result.stdout
+        assert "aws-super-cli cost summary" in result.stdout
     
     def test_explicit_help_flag(self):
         """Test explicit help flag works cleanly"""
