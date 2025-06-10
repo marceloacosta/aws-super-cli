@@ -134,8 +134,8 @@ gh issue close <issue_number> --comment "Completed: <summary of what was impleme
 - [x] All existing tests still passing (113/113)
 - [x] Feature branch merged and cleaned up
 - [x] Version bump to v0.14.0 in setup.py
-- [ ] Git tagging and GitHub release
-- [ ] PyPI release publication
+- [x] Git tagging and GitHub release
+- [x] PyPI release publication - LIVE: https://pypi.org/project/aws-super-cli/0.14.0/
 
 ---
 
