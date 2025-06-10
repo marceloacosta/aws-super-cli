@@ -39,6 +39,13 @@ Build the **AWS security and discovery tool** that solves the top pain points en
    - Ensure documentation matches current feature set
 5. **PyPI Release** - MANDATORY after every completed feature/issue:
    - Bump version number in setup.py and __init__.py
+   - **VERSION CONSISTENCY VERIFICATION (CRITICAL)**:
+     - Update version in `setup.py`
+     - Update version in `aws_super_cli/__init__.py`
+     - Update any hardcoded versions in templates/reports (e.g., enhanced_reporting.py)
+     - Verify `aws-super-cli version` shows correct version number
+     - Verify generated reports show correct version in footer
+     - Run version consistency check across entire codebase
    - Create new PyPI release with changelog
    - Tag the release in GitHub with version number
    - Include release notes describing what changed
@@ -82,6 +89,16 @@ gh issue close <issue_number> --comment "Completed: <summary of what was impleme
 - ✅ Always use: Generic examples, placeholder tokens, example account IDs (123456789012)
 - ✅ Always use: `github_pat_EXAMPLE` for documentation, not real tokens
 - **ENFORCEMENT**: Review every GitHub comment and commit for personal information before submitting
+
+## 🚨 CRITICAL VERSION CONSISTENCY STANDARDS
+**ABSOLUTELY NO VERSION INCONSISTENCIES - MANDATORY RULE**
+- ❌ Never release with mismatched versions across files
+- ❌ Never hardcode versions in templates without dynamic imports
+- ❌ Never skip version verification in CLI and reports
+- ✅ Always update ALL version locations: setup.py, __init__.py, templates
+- ✅ Always verify `aws-super-cli version` shows correct version
+- ✅ Always verify generated reports show correct version
+- **ENFORCEMENT**: Run version consistency verification before every release
 
 ## Communication Standards
 **For CLI output:**
