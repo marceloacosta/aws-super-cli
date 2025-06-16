@@ -1584,6 +1584,7 @@ def explain_arn(
 def optimization_readiness():
     """Check prerequisites for cost optimization features"""
     from .services.cost_optimization import cost_optimization_core
+    from .services.trusted_advisor import trusted_advisor
     
     async def check_readiness():
         safe_print()
@@ -1600,14 +1601,30 @@ def optimization_readiness():
         ]
         iam_results = await cost_optimization_core.check_iam_permissions(required_policies)
         
-        # Check support plan
+        # Check support plan using both methods
         support_info = await cost_optimization_core.check_support_plan()
+        
+        # Also check Trusted Advisor access directly
+        ta_access = await trusted_advisor.check_support_plan_access()
         
         # Create and display prerequisites table
         table = cost_optimization_core.create_prerequisites_table(
             account_info, iam_results, support_info
         )
         safe_print(table)
+        
+        # Additional Trusted Advisor specific information
+        safe_print()
+        safe_print("[bold]Trusted Advisor Status[/bold]")
+        if ta_access.get('has_access'):
+            safe_print(f"[green]✓ Support Plan: {ta_access.get('support_plan')}[/green]")
+            safe_print(f"[green]✓ Available Checks: {ta_access.get('checks_available', 0)}[/green]")
+            safe_print(f"[dim]{ta_access.get('message')}[/dim]")
+        else:
+            safe_print(f"[yellow]⚠ Support Plan: {ta_access.get('support_plan')}[/yellow]")
+            safe_print(f"[yellow]✗ {ta_access.get('message')}[/yellow]")
+            if ta_access.get('error_code') == 'SUBSCRIPTION_REQUIRED':
+                safe_print("[dim]Upgrade to Business or Enterprise support plan to access Trusted Advisor[/dim]")
         
         # Provide guidance based on results
         safe_print()
@@ -1621,8 +1638,8 @@ def optimization_readiness():
                 policy_name = policy.split('/')[-1] if '/' in policy else policy
                 missing_requirements.append(f"IAM policy: {policy_name}")
         
-        if not support_info.get('trusted_advisor_available'):
-            missing_requirements.append("Business or Enterprise support plan")
+        if not ta_access.get('has_access'):
+            missing_requirements.append("Business or Enterprise support plan for Trusted Advisor")
         
         if missing_requirements:
             safe_print("[yellow]Missing Requirements:[/yellow]")
@@ -1653,7 +1670,8 @@ def optimization_recommendations(
     export: bool = typer.Option(True, "--export/--no-export", help="Export recommendations to files"),
 ):
     """Get cost optimization recommendations from AWS services"""
-    from .services.cost_optimization import cost_optimization_core, OptimizationRecommendation
+    from .services.cost_optimization import cost_optimization_core, OptimizationRecommendation, handle_optimization_error
+    from .services.trusted_advisor import trusted_advisor
     
     async def get_recommendations():
         safe_print()
@@ -1670,53 +1688,78 @@ def optimization_recommendations(
         safe_print(f"[dim]Account: {account_info.get('account_id')}[/dim]")
         safe_print()
         
-        # For now, create sample recommendations to demonstrate the infrastructure
-        # TODO: Implement actual service integrations in Issues #19-22
-        sample_recommendations = [
-            OptimizationRecommendation(
-                service="trusted-advisor",
-                resource_id="i-1234567890abcdef0",
-                resource_type="EC2 Instance",
-                recommendation_type="Idle Resource",
-                current_cost=50.0,
-                estimated_savings=45.0,
-                confidence="HIGH",
-                description="EC2 instance has been idle for 14+ days",
-                remediation_steps=[
-                    "Review instance usage patterns",
-                    "Consider stopping or terminating if not needed",
-                    "Resize to smaller instance type if needed"
-                ],
-                region="us-east-1",
-                account_id=account_info.get('account_id', 'unknown'),
-                timestamp=datetime.now().isoformat(),
-                source="trusted_advisor"
-            ),
-            OptimizationRecommendation(
-                service="compute-optimizer",
-                resource_id="vol-0987654321fedcba0",
-                resource_type="EBS Volume",
-                recommendation_type="Underutilized Storage",
-                current_cost=20.0,
-                estimated_savings=15.0,
-                confidence="MEDIUM",
-                description="EBS volume utilization below 20%",
-                remediation_steps=[
-                    "Analyze storage usage patterns",
-                    "Consider resizing to smaller volume",
-                    "Migrate to cheaper storage class if appropriate"
-                ],
-                region="us-west-2",
-                account_id=account_info.get('account_id', 'unknown'),
-                timestamp=datetime.now().isoformat(),
-                source="compute_optimizer"
-            )
-        ]
+        all_recommendations = []
         
-        # Display recommendations
-        if sample_recommendations:
-            table = Table(title="Cost Optimization Recommendations")
-            table.add_column("Service", style="cyan")
+        # Determine which services to query
+        services_to_query = []
+        if service:
+            if service.lower() == "trusted-advisor":
+                services_to_query = ["trusted-advisor"]
+            elif service.lower() == "compute-optimizer":
+                services_to_query = ["compute-optimizer"]
+            elif service.lower() == "cost-explorer":
+                services_to_query = ["cost-explorer"]
+            else:
+                safe_print(f"[red]Unknown service: {service}[/red]")
+                safe_print("Available services: trusted-advisor, compute-optimizer, cost-explorer")
+                return
+        elif all_services:
+            services_to_query = ["trusted-advisor", "compute-optimizer", "cost-explorer"]
+        else:
+            services_to_query = ["trusted-advisor"]  # Default to Trusted Advisor
+        
+        # Get Trusted Advisor recommendations
+        if "trusted-advisor" in services_to_query:
+            safe_print("[bold]Trusted Advisor Integration[/bold]")
+            try:
+                # First check support plan access
+                access_check = await trusted_advisor.check_support_plan_access()
+                
+                if access_check.get('has_access'):
+                    safe_print(f"[green]✓ Support Plan: {access_check.get('support_plan')}[/green]")
+                    safe_print(f"[dim]Available checks: {access_check.get('checks_available', 0)}[/dim]")
+                    
+                    # Get recommendations
+                    ta_recommendations = await trusted_advisor.get_cost_optimization_recommendations()
+                    all_recommendations.extend(ta_recommendations)
+                    
+                    if ta_recommendations:
+                        # Show Trusted Advisor summary
+                        ta_table = trusted_advisor.create_trusted_advisor_summary_table(ta_recommendations)
+                        safe_print(ta_table)
+                        safe_print()
+                    else:
+                        safe_print("[yellow]No Trusted Advisor recommendations found[/yellow]")
+                        safe_print("[dim]This indicates your resources are well-optimized![/dim]")
+                        safe_print()
+                else:
+                    safe_print(f"[yellow]⚠ Support Plan: {access_check.get('support_plan')}[/yellow]")
+                    safe_print(f"[yellow]{access_check.get('message')}[/yellow]")
+                    if access_check.get('error_code') == 'SUBSCRIPTION_REQUIRED':
+                        safe_print("[dim]Upgrade to Business or Enterprise support plan to access Trusted Advisor[/dim]")
+                    safe_print()
+                    
+            except Exception as e:
+                handle_optimization_error(e, "Trusted Advisor")
+                safe_print()
+        
+        # Placeholder for other services (Issues #20-22)
+        if "compute-optimizer" in services_to_query:
+            safe_print("[bold]Compute Optimizer Integration[/bold]")
+            safe_print("[yellow]Coming soon in Issue #20[/yellow]")
+            safe_print()
+        
+        if "cost-explorer" in services_to_query:
+            safe_print("[bold]Cost Explorer Integration[/bold]")
+            safe_print("[yellow]Coming soon in Issue #21[/yellow]")
+            safe_print()
+        
+        # Display combined recommendations
+        if all_recommendations:
+            safe_print("[bold]Combined Recommendations Summary[/bold]")
+            
+            table = Table(title="All Cost Optimization Recommendations")
+            table.add_column("Source", style="cyan")
             table.add_column("Resource", style="yellow")
             table.add_column("Type", style="green")
             table.add_column("Savings", style="bold green")
@@ -1724,7 +1767,7 @@ def optimization_recommendations(
             table.add_column("Description")
             
             total_savings = 0.0
-            for rec in sample_recommendations:
+            for rec in all_recommendations:
                 table.add_row(
                     rec.source,
                     rec.resource_id[:20] + "..." if len(rec.resource_id) > 20 else rec.resource_id,
@@ -1742,7 +1785,7 @@ def optimization_recommendations(
             # Export recommendations if requested
             if export:
                 saved_files = cost_optimization_core.save_recommendations(
-                    sample_recommendations, "optimization-recommendations"
+                    all_recommendations, "optimization-recommendations"
                 )
                 safe_print()
                 safe_print("[dim]Recommendations exported to:[/dim]")
@@ -1753,10 +1796,11 @@ def optimization_recommendations(
             safe_print("This may indicate:")
             safe_print("  • Your resources are already optimized")
             safe_print("  • Insufficient data for analysis")
-            safe_print("  • Missing required permissions")
+            safe_print("  • Missing required permissions or support plan")
+            safe_print("  • Service integrations not yet available")
         
         safe_print()
-        safe_print("[dim]Note: This is the core infrastructure. Service integrations will be added in upcoming releases.[/dim]")
+        safe_print("[dim]Note: Trusted Advisor integration is now active. Additional service integrations coming soon.[/dim]")
     
     asyncio.run(get_recommendations())
 
