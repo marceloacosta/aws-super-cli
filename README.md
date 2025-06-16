@@ -46,6 +46,9 @@ aws-super-cli ls ec2 --all-accounts
 # Get comprehensive cost analysis with optimization recommendations
 aws-super-cli cost-snapshot
 
+# Generate professional executive report for CFO/board presentation
+aws-super-cli executive-report
+
 # Get cost summary with credit analysis
 aws-super-cli cost summary
 
@@ -180,6 +183,10 @@ aws-super-cli optimization-recommendations --service compute-optimizer # Compute
 
 # Check optimization service availability
 aws-super-cli optimization-readiness           # Verify service access and permissions
+
+# Generate professional executive reports
+aws-super-cli executive-report                 # Professional HTML report for CFO presentation
+aws-super-cli executive-report --title "Q4 2024 AWS Cost Optimization Report" --days 90
 ```
 
 ### Cost Optimization Features
@@ -203,6 +210,14 @@ aws-super-cli optimization-readiness           # Verify service access and permi
 - Auto Scaling group optimization recommendations
 - EBS volume optimization suggestions
 - Lambda function memory optimization
+
+**Executive Report Generation:**
+- Professional HTML reports ready for CFO/board presentation
+- Executive summary with key financial metrics and ROI analysis
+- Service-by-service breakdown with total savings per service
+- Implementation roadmap with phased approach and effort levels
+- Print-ready format for PDF conversion and stakeholder distribution
+- Customizable report titles and analysis periods
 
 ### Example Cost Optimization Output
 
@@ -228,6 +243,28 @@ Cost Analysis & Optimization Recommendations (Last 7 Days)
 └───────────────────┴────────────────────────┴────────────────────┴────────────┴────────────────────┘
 
 Total Potential Monthly Savings: $126.72
+```
+
+### Confidence Scoring System
+
+AWS Super CLI uses intelligent confidence scoring to help prioritize optimization efforts:
+
+**Cost Optimization Hub Confidence:**
+- **HIGH**: Very Low/Low implementation effort (easy wins)
+- **MEDIUM**: Medium/High implementation effort (moderate complexity)
+- **LOW**: Very High implementation effort (complex changes)
+
+**Compute Optimizer Confidence:**
+- **HIGH**: Overprovisioned/Underprovisioned resources (clear optimization opportunity)
+- **MEDIUM**: General optimization recommendations
+- **LOW**: Already optimized resources (no change needed)
+
+**Trusted Advisor Confidence:**
+- **HIGH**: Idle resources, Reserved Instance opportunities
+- **MEDIUM**: General cost optimization recommendations
+- **LOW**: Low-impact optimizations
+
+The confidence levels help you focus on high-impact, low-effort optimizations first, maximizing ROI while minimizing operational risk.
 ```
 
 ## Security Auditing
