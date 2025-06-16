@@ -1607,13 +1607,17 @@ def optimization_readiness():
         # Also check Trusted Advisor access directly
         ta_access = await trusted_advisor.check_support_plan_access()
         
+        # Check Compute Optimizer enrollment status
+        from .services.compute_optimizer import compute_optimizer
+        co_status = await compute_optimizer.check_enrollment_status()
+        
         # Create and display prerequisites table
         table = cost_optimization_core.create_prerequisites_table(
             account_info, iam_results, support_info
         )
         safe_print(table)
         
-        # Additional Trusted Advisor specific information
+        # Additional service-specific information
         safe_print()
         safe_print("[bold]Trusted Advisor Status[/bold]")
         if ta_access.get('has_access'):
@@ -1625,6 +1629,20 @@ def optimization_readiness():
             safe_print(f"[yellow]✗ {ta_access.get('message')}[/yellow]")
             if ta_access.get('error_code') == 'SUBSCRIPTION_REQUIRED':
                 safe_print("[dim]Upgrade to Business or Enterprise support plan to access Trusted Advisor[/dim]")
+        
+        safe_print()
+        safe_print("[bold]Compute Optimizer Status[/bold]")
+        if co_status.get('enrolled'):
+            safe_print(f"[green]✓ Status: {co_status.get('status')}[/green]")
+            safe_print(f"[green]✓ Member Accounts: {co_status.get('member_accounts_enrolled')}[/green]")
+            safe_print(f"[dim]{co_status.get('message')}[/dim]")
+        else:
+            safe_print(f"[yellow]⚠ Status: {co_status.get('status')}[/yellow]")
+            safe_print(f"[yellow]✗ {co_status.get('message')}[/yellow]")
+            if co_status.get('error_code') == 'ACCESS_DENIED':
+                safe_print("[dim]Attach ComputeOptimizerReadOnlyAccess IAM policy to access Compute Optimizer[/dim]")
+            elif co_status.get('status') == 'Inactive':
+                safe_print("[dim]Compute Optimizer can be automatically activated when running recommendations[/dim]")
         
         # Provide guidance based on results
         safe_print()
@@ -1640,6 +1658,9 @@ def optimization_readiness():
         
         if not ta_access.get('has_access'):
             missing_requirements.append("Business or Enterprise support plan for Trusted Advisor")
+        
+        if not co_status.get('enrolled') and co_status.get('error_code') == 'ACCESS_DENIED':
+            missing_requirements.append("ComputeOptimizerReadOnlyAccess IAM policy")
         
         if missing_requirements:
             safe_print("[yellow]Missing Requirements:[/yellow]")
@@ -1743,11 +1764,51 @@ def optimization_recommendations(
                 handle_optimization_error(e, "Trusted Advisor")
                 safe_print()
         
-        # Placeholder for other services (Issues #20-22)
+        # Get Compute Optimizer recommendations
         if "compute-optimizer" in services_to_query:
             safe_print("[bold]Compute Optimizer Integration[/bold]")
-            safe_print("[yellow]Coming soon in Issue #20[/yellow]")
-            safe_print()
+            try:
+                from .services.compute_optimizer import compute_optimizer
+                
+                # First check enrollment status
+                enrollment_status = await compute_optimizer.check_enrollment_status()
+                
+                if enrollment_status.get('enrolled'):
+                    safe_print(f"[green]✓ Status: {enrollment_status.get('status')}[/green]")
+                    safe_print(f"[dim]Member accounts enrolled: {enrollment_status.get('member_accounts_enrolled')}[/dim]")
+                    
+                    # Get recommendations
+                    co_recommendations = await compute_optimizer.get_all_recommendations()
+                    all_recommendations.extend(co_recommendations)
+                    
+                    if co_recommendations:
+                        # Show Compute Optimizer summary
+                        co_table = compute_optimizer.create_compute_optimizer_summary_table(co_recommendations)
+                        safe_print(co_table)
+                        safe_print()
+                    else:
+                        safe_print("[yellow]No Compute Optimizer recommendations found[/yellow]")
+                        safe_print("[dim]This indicates your compute resources are well-optimized![/dim]")
+                        safe_print()
+                else:
+                    safe_print(f"[yellow]⚠ Status: {enrollment_status.get('status')}[/yellow]")
+                    safe_print(f"[yellow]{enrollment_status.get('message')}[/yellow]")
+                    
+                    if enrollment_status.get('error_code') == 'ACCESS_DENIED':
+                        safe_print("[dim]Attach ComputeOptimizerReadOnlyAccess IAM policy to access Compute Optimizer[/dim]")
+                    elif enrollment_status.get('status') == 'Inactive':
+                        safe_print("[dim]Attempting to activate Compute Optimizer enrollment...[/dim]")
+                        activation_result = await compute_optimizer.activate_enrollment()
+                        if activation_result.get('success'):
+                            safe_print(f"[green]✓ {activation_result.get('message')}[/green]")
+                            safe_print("[dim]Note: It may take up to 24 hours for recommendations to appear[/dim]")
+                        else:
+                            safe_print(f"[yellow]✗ {activation_result.get('message')}[/yellow]")
+                    safe_print()
+                    
+            except Exception as e:
+                handle_optimization_error(e, "Compute Optimizer")
+                safe_print()
         
         if "cost-explorer" in services_to_query:
             safe_print("[bold]Cost Explorer Integration[/bold]")
