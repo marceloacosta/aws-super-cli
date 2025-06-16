@@ -199,16 +199,42 @@ requirements-dev.txt
 # OS specific files
 .DS_Store
 
-# Sensitive audit reports and real data (prevent accidental commits of personal info)
-REAL_*.html
-*_audit_report_*.html
-aws_security_audit_*.html
-*@*.tech
-*@*.com
-test_*.html
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+# Security reports and sensitive data (NEVER commit these)
+*security*report*
+*audit*report*
+*report*.html
+*report*.csv
+*report*.txt
+*report*.json
+*report*.xml
+cloudtrail*
+logs/
+*.log
+temp-*
+tmp-*
+*-temp.*
+*-tmp.*
+
+# AWS credentials and sensitive files
+.aws/
+credentials
+config
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Any file that might contain personal/sensitive information  
+personal-*
+private-*
+secret-*
+sensitive-*
+confidential-*
+internal-*
+*-credentials*
+*-secrets*
+*-keys*
+*-tokens*
+token*
+secret*
