@@ -1644,6 +1644,34 @@ def optimization_readiness():
             elif co_status.get('status') == 'Inactive':
                 safe_print("[dim]Compute Optimizer can be automatically activated when running recommendations[/dim]")
         
+        safe_print()
+        safe_print("[bold]Service Quotas Status[/bold]")
+        try:
+            from .services.service_quotas import ServiceQuotasIntegration
+            
+            service_quotas = ServiceQuotasIntegration(aws_session)
+            
+            # Test basic Service Quotas access
+            quota_data = await service_quotas._get_quota_utilization()
+            if quota_data:
+                safe_print(f"[green]✓ Service Quotas API access: Available[/green]")
+                safe_print(f"[green]✓ Quotas analyzed: {len(quota_data)}[/green]")
+                
+                # Check for any quotas approaching limits
+                high_utilization = [q for q in quota_data if q['utilization_percentage'] >= 80]
+                if high_utilization:
+                    safe_print(f"[yellow]⚠ {len(high_utilization)} quotas approaching limits[/yellow]")
+                    safe_print("[dim]Run optimization-recommendations --service service-quotas for details[/dim]")
+                else:
+                    safe_print("[green]✓ All quotas within safe limits[/green]")
+            else:
+                safe_print("[yellow]⚠ Service Quotas API: No quota data available[/yellow]")
+                safe_print("[dim]May require additional IAM permissions or service usage[/dim]")
+                
+        except Exception as e:
+            safe_print(f"[red]✗ Service Quotas API: {str(e)}[/red]")
+            safe_print("[dim]Ensure servicequotas:ListServices permission is attached[/dim]")
+        
         # Provide guidance based on results
         safe_print()
         missing_requirements = []
@@ -1720,12 +1748,14 @@ def optimization_recommendations(
                 services_to_query = ["compute-optimizer"]
             elif service.lower() == "cost-explorer":
                 services_to_query = ["cost-explorer"]
+            elif service.lower() == "service-quotas":
+                services_to_query = ["service-quotas"]
             else:
                 safe_print(f"[red]Unknown service: {service}[/red]")
-                safe_print("Available services: trusted-advisor, compute-optimizer, cost-explorer")
+                safe_print("Available services: trusted-advisor, compute-optimizer, cost-explorer, service-quotas")
                 return
         elif all_services:
-            services_to_query = ["trusted-advisor", "compute-optimizer", "cost-explorer"]
+            services_to_query = ["trusted-advisor", "compute-optimizer", "cost-explorer", "service-quotas"]
         else:
             services_to_query = ["trusted-advisor"]  # Default to Trusted Advisor
         
@@ -1842,6 +1872,39 @@ def optimization_recommendations(
                     
             except Exception as e:
                 handle_optimization_error(e, "Cost Explorer")
+                safe_print()
+        
+        # Get Service Quotas recommendations
+        if "service-quotas" in services_to_query:
+            safe_print("[bold]Service Quotas Integration[/bold]")
+            try:
+                from .services.service_quotas import ServiceQuotasIntegration
+                
+                service_quotas = ServiceQuotasIntegration(aws_session)
+                
+                # Get quota utilization analysis
+                quota_recommendations = await service_quotas.get_quota_recommendations()
+                all_recommendations.extend(quota_recommendations)
+                
+                if quota_recommendations:
+                    # Show Service Quotas summary
+                    sq_table = service_quotas.create_quota_recommendations_table(quota_recommendations)
+                    safe_print(sq_table)
+                    safe_print()
+                    
+                    # Show quota utilization details
+                    quota_data = await service_quotas._get_quota_utilization()
+                    if quota_data:
+                        quota_table = service_quotas.create_quota_utilization_table(quota_data)
+                        safe_print(quota_table)
+                        safe_print()
+                else:
+                    safe_print("[green]✓ All service quotas are within safe limits[/green]")
+                    safe_print("[dim]No quota warnings or recommendations at this time[/dim]")
+                    safe_print()
+                    
+            except Exception as e:
+                handle_optimization_error(e, "Service Quotas")
                 safe_print()
         
         # Display combined recommendations
