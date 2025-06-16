@@ -783,7 +783,7 @@ def accounts(
             unhealthy_accounts = [acc for acc in enhanced_accounts if acc.health.value in ['warning', 'error']]
             if unhealthy_accounts:
                 safe_print(f"\n[yellow]Health Issues Found[/yellow]")
-                safe_print(f"Run [cyan]aws-super-cli accounts health[/cyan] for detailed health information")
+                safe_print(f"Run [cyan]aws-super-cli accounts-health[/cyan] for detailed health information")
         
     except Exception as e:
         safe_print(f"[red]Error discovering accounts: {e}[/red]")
