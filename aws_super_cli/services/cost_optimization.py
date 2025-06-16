@@ -107,6 +107,46 @@ class CostOptimizationCore:
         
         return saved_files
     
+    def save_data(self, data: Dict[str, Any], service: str) -> Dict[str, str]:
+        """Save arbitrary data to files in configured formats"""
+        saved_files = {}
+        
+        try:
+            for format in self.config.export_formats:
+                filename = self.get_timestamped_filename(service, format)
+                
+                if format == "json":
+                    self._save_json_data(data, filename)
+                elif format == "csv":
+                    # For CSV, flatten the data structure
+                    if isinstance(data, dict):
+                        flattened_data = []
+                        for key, value in data.items():
+                            if isinstance(value, (list, dict)):
+                                flattened_data.append({
+                                    'key': key,
+                                    'value': str(value),
+                                    'type': type(value).__name__
+                                })
+                            else:
+                                flattened_data.append({
+                                    'key': key,
+                                    'value': str(value),
+                                    'type': type(value).__name__
+                                })
+                        self._save_csv(flattened_data, filename)
+                    else:
+                        self._save_csv([data] if not isinstance(data, list) else data, filename)
+                
+                saved_files[format] = filename
+                self.console.print(f"[green]Saved data to {filename}[/green]")
+        
+        except Exception as e:
+            self.console.print(f"[red]Error saving data: {e}[/red]")
+            raise
+        
+        return saved_files
+    
     def _save_json(self, data: List[Dict], filename: str) -> None:
         """Save data as JSON with proper formatting"""
         with open(filename, 'w') as f:
@@ -114,6 +154,14 @@ class CostOptimizationCore:
                 "generated_at": datetime.now().isoformat(),
                 "total_recommendations": len(data),
                 "recommendations": data
+            }, f, indent=2, default=str)
+    
+    def _save_json_data(self, data: Dict[str, Any], filename: str) -> None:
+        """Save arbitrary data as JSON with proper formatting"""
+        with open(filename, 'w') as f:
+            json.dump({
+                "generated_at": datetime.now().isoformat(),
+                "data": data
             }, f, indent=2, default=str)
     
     def _save_csv(self, data: List[Dict], filename: str) -> None:

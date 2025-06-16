@@ -1810,10 +1810,39 @@ def optimization_recommendations(
                 handle_optimization_error(e, "Compute Optimizer")
                 safe_print()
         
+        # Get Cost Explorer recommendations
         if "cost-explorer" in services_to_query:
             safe_print("[bold]Cost Explorer Integration[/bold]")
-            safe_print("[yellow]Coming soon in Issue #21[/yellow]")
-            safe_print()
+            try:
+                from .services.cost_explorer import cost_explorer
+                
+                # Get spend analysis first
+                spend_analysis = await cost_explorer.get_current_spend_analysis()
+                safe_print(f"[green]✓ Current spend analysis: ${spend_analysis.get('total_cost', 0):.2f} (last 30 days)[/green]")
+                safe_print(f"[dim]Top services analyzed: {len(spend_analysis.get('services', []))}[/dim]")
+                
+                # Get all Cost Explorer recommendations
+                ce_recommendations = await cost_explorer.get_all_recommendations()
+                all_recommendations.extend(ce_recommendations)
+                
+                if ce_recommendations:
+                    # Show Cost Explorer summary
+                    ce_table = cost_explorer.create_recommendations_summary_table(ce_recommendations)
+                    safe_print(ce_table)
+                    safe_print()
+                    
+                    # Show spend analysis table
+                    spend_table = cost_explorer.create_spend_analysis_table(spend_analysis)
+                    safe_print(spend_table)
+                    safe_print()
+                else:
+                    safe_print("[yellow]No Cost Explorer recommendations found[/yellow]")
+                    safe_print("[dim]This may indicate insufficient usage data or well-optimized resources[/dim]")
+                    safe_print()
+                    
+            except Exception as e:
+                handle_optimization_error(e, "Cost Explorer")
+                safe_print()
         
         # Display combined recommendations
         if all_recommendations:
@@ -1873,6 +1902,7 @@ def cost_snapshot(
 ):
     """Generate comprehensive cost analysis snapshot"""
     from .services.cost_optimization import cost_optimization_core
+    from .services.cost_explorer import cost_explorer
     from .services import cost as cost_analysis
     
     async def generate_snapshot():
@@ -1891,69 +1921,87 @@ def cost_snapshot(
         safe_print()
         
         try:
-            # Get current cost data using existing cost analysis
-            safe_print("[bold]Current Cost Analysis[/bold]")
+            # Get Cost Explorer spend analysis
+            safe_print("[bold]Cost Explorer Analysis[/bold]")
+            spend_analysis = await cost_explorer.get_current_spend_analysis(days=days)
             
-            # Get cost summary
-            cost_summary = await cost_analysis.get_cost_summary(days=days)
-            
-            # Create cost summary table
-            summary_table = Table(title=f"Cost Summary - Last {days} Days")
-            summary_table.add_column("Metric", style="cyan")
-            summary_table.add_column("Amount", style="bold green")
-            
-            for key, value in cost_summary.items():
-                if key != 'period':
-                    metric_name = key.replace('_', ' ').title()
-                    summary_table.add_row(metric_name, value)
-            
-            safe_print(summary_table)
-            safe_print()
-            
-            # Get top spending services
-            safe_print("[bold]Top Spending Services[/bold]")
-            top_services = await cost_analysis.get_cost_by_service(days=days, limit=10)
-            
-            if top_services:
-                services_table = cost_analysis.create_cost_table(
-                    top_services, 
-                    f"Top Services - Last {days} Days",
-                    ["Service", "Cost"]
-                )
-                safe_print(services_table)
-            else:
-                safe_print("[yellow]No cost data available[/yellow]")
-            
-            safe_print()
-            
-            # Optimization opportunities summary
-            safe_print("[bold]Optimization Opportunities[/bold]")
-            safe_print("✓ Cost analysis completed")
-            safe_print("• Run 'aws-super-cli optimization-recommendations' for specific recommendations")
-            safe_print("• Run 'aws-super-cli optimization-readiness' to check prerequisites")
-            
-            # Export snapshot if requested
-            if export:
-                snapshot_data = {
-                    "account_id": account_info.get('account_id'),
-                    "generated_at": datetime.now().isoformat(),
-                    "period_days": days,
-                    "cost_summary": cost_summary,
-                    "top_services": top_services[:5] if top_services else []
-                }
-                
-                # Save snapshot
-                filename = cost_optimization_core.get_timestamped_filename("cost-snapshot", "json")
-                with open(filename, 'w') as f:
-                    import json
-                    json.dump(snapshot_data, f, indent=2, default=str)
-                
+            if spend_analysis.get('total_cost', 0) > 0:
+                spend_table = cost_explorer.create_spend_analysis_table(spend_analysis)
+                safe_print(spend_table)
                 safe_print()
-                safe_print(f"[green]Cost snapshot exported to: {filename}[/green]")
-        
+            else:
+                safe_print("[yellow]No cost data available for the specified period[/yellow]")
+                safe_print()
+            
+            # Get billing credits
+            safe_print("[bold]Billing Credits Analysis[/bold]")
+            credits_data = await cost_explorer.get_billing_credits()
+            
+            if credits_data.get('total_credits', 0) > 0:
+                safe_print(f"[green]✓ Total Credits Available: ${credits_data.get('total_credits', 0):.2f}[/green]")
+                
+                if credits_data.get('credits'):
+                    from rich.table import Table
+                    credits_table = Table(title="Available Credits Breakdown")
+                    credits_table.add_column("Type", style="cyan")
+                    credits_table.add_column("Amount", justify="right", style="green")
+                    credits_table.add_column("Description", style="yellow")
+                    credits_table.add_column("Expiry", style="red")
+                    
+                    for credit in credits_data['credits']:
+                        credits_table.add_row(
+                            credit.get('type', 'Unknown'),
+                            f"${credit.get('amount', 0):.2f}",
+                            credit.get('description', 'N/A')[:50],
+                            credit.get('expiry_date', 'N/A')
+                        )
+                    
+                    safe_print(credits_table)
+                safe_print()
+            else:
+                safe_print("[dim]No billing credits found[/dim]")
+                safe_print()
+            
+            # Get all optimization recommendations
+            safe_print("[bold]Optimization Recommendations Summary[/bold]")
+            all_recommendations = await cost_explorer.get_all_recommendations()
+            
+            if all_recommendations:
+                recommendations_table = cost_explorer.create_recommendations_summary_table(all_recommendations)
+                safe_print(recommendations_table)
+                safe_print()
+                
+                total_savings = sum(rec.estimated_savings for rec in all_recommendations)
+                safe_print(f"[bold green]Total Potential Monthly Savings: ${total_savings:.2f}[/bold green]")
+                safe_print()
+                
+                if export:
+                    # Export comprehensive snapshot
+                    snapshot_data = {
+                        'account_id': account_info.get('account_id'),
+                        'analysis_period_days': days,
+                        'spend_analysis': spend_analysis,
+                        'credits_analysis': credits_data,
+                        'recommendations': [rec.__dict__ for rec in all_recommendations],
+                        'total_potential_savings': total_savings,
+                        'snapshot_date': datetime.now().isoformat()
+                    }
+                    
+                    saved_files = cost_optimization_core.save_data(
+                        snapshot_data, "cost-snapshot"
+                    )
+                    
+                    safe_print("[dim]Snapshot exported to:[/dim]")
+                    for format, filepath in saved_files.items():
+                        safe_print(f"  {format.upper()}: {filepath}")
+            else:
+                safe_print("[yellow]No optimization recommendations found[/yellow]")
+                safe_print("[dim]This may indicate well-optimized resources or insufficient data[/dim]")
+            
         except Exception as e:
             safe_print(f"[red]Error generating cost snapshot: {e}[/red]")
-            safe_print("[yellow]Ensure you have Cost Explorer permissions and data is available[/yellow]")
+            if "debug" in str(e).lower():
+                safe_print("[dim]Try running with --debug for more information[/dim]")
     
     asyncio.run(generate_snapshot())
 
