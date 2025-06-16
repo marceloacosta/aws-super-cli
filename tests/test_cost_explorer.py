@@ -250,14 +250,25 @@ class TestCostExplorerIntegration:
             'items': [
                 {
                     'resourceId': 'i-abcdef1234567890',
-                    'resourceType': 'EC2Instance',
-                    'recommendationType': 'RightSize',
+                    'currentResourceType': 'Ec2Instance',
+                    'recommendedResourceType': 'Ec2Instance',
+                    'actionType': 'Rightsize',
                     'estimatedMonthlySavings': 40.00,
+                    'estimatedMonthlyCost': 120.00,
+                    'estimatedSavingsPercentage': 33.0,
                     'recommendationId': 'rec-123',
                     'accountId': '123456789012',
                     'region': 'us-east-1',
                     'lastRefreshTimestamp': '2024-01-15T10:00:00Z',
-                    'implementationEffort': 'LOW'
+                    'implementationEffort': 'Low',
+                    'currentResourceSummary': 't3.medium',
+                    'recommendedResourceSummary': 't3.small',
+                    'tags': [
+                        {
+                            'key': 'Name',
+                            'value': 'Test Instance'
+                        }
+                    ]
                 }
             ]
         }
@@ -276,10 +287,15 @@ class TestCostExplorerIntegration:
             rec = recommendations[0]
             assert rec.source == 'cost_optimization_hub'
             assert rec.resource_id == 'i-abcdef1234567890'
-            assert rec.resource_type == 'EC2Instance'
-            assert rec.recommendation_type == 'RightSize'
+            assert rec.resource_type == 'EC2 Instance'
+            assert rec.recommendation_type == 'Rightsize'
             assert rec.estimated_savings == 40.00
-            assert rec.confidence == 'MEDIUM'
+            assert rec.current_cost == 120.00
+            assert rec.confidence == 'HIGH'  # Low implementation effort maps to HIGH confidence
+            assert rec.service == 'EC2'
+            assert 'Test Instance' in rec.description
+            assert 't3.medium' in rec.description
+            assert 't3.small' in rec.description
     
     @pytest.mark.asyncio
     async def test_get_all_recommendations_integration(self, cost_explorer):

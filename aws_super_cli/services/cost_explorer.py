@@ -345,29 +345,41 @@ class CostExplorerIntegration:
             account_info = await self.core.get_account_info()
             
             for rec in response.get('items', []):
-                resource_id = rec.get('resourceId', 'unknown')
-                resource_type = rec.get('resourceType', 'unknown')
+                # Extract resource information properly
+                resource_id = rec.get('resourceId', rec.get('recommendationId', 'unknown'))
+                current_resource_type = rec.get('currentResourceType', 'unknown')
+                recommended_resource_type = rec.get('recommendedResourceType', current_resource_type)
+                action_type = rec.get('actionType', 'optimization')
                 
-                # Calculate savings
-                savings_amount = 0
-                if 'estimatedMonthlySavings' in rec:
-                    savings_amount = float(rec['estimatedMonthlySavings'])
+                # Get resource name from tags or resource summary
+                resource_name = self._extract_resource_name(rec)
+                
+                # Calculate savings and costs
+                savings_amount = float(rec.get('estimatedMonthlySavings', 0))
+                current_cost = float(rec.get('estimatedMonthlyCost', 0))
+                
+                # Determine confidence based on implementation effort
+                confidence = self._map_implementation_effort_to_confidence(
+                    rec.get('implementationEffort', 'Medium')
+                )
+                
+                # Create meaningful description
+                description = self._create_coh_description(rec, resource_name)
+                
+                # Create specific remediation steps
+                remediation_steps = self._create_coh_remediation_steps(rec, resource_name)
                 
                 recommendation = OptimizationRecommendation(
-                    service='Cost Optimization Hub',
+                    service=self._map_resource_type_to_service(current_resource_type),
                     resource_id=resource_id,
-                    resource_type=resource_type,
-                    recommendation_type=rec.get('recommendationType', 'optimization'),
-                    current_cost=0,  # COH doesn't provide current cost
+                    resource_type=self._format_resource_type(current_resource_type),
+                    recommendation_type=action_type,
+                    current_cost=current_cost,
                     estimated_savings=savings_amount,
-                    confidence='MEDIUM',
-                    description=f"Cost optimization recommendation for {resource_type}",
-                    remediation_steps=[
-                        "Review the detailed recommendation in AWS Console",
-                        "Implement the suggested optimization",
-                        "Monitor the impact on costs and performance"
-                    ],
-                    region=rec.get('region', 'unknown'),
+                    confidence=confidence,
+                    description=description,
+                    remediation_steps=remediation_steps,
+                    region=rec.get('region', 'Global'),
                     account_id=rec.get('accountId', account_info.get('account_id', 'unknown')),
                     timestamp=rec.get('lastRefreshTimestamp', datetime.now().isoformat()),
                     source='cost_optimization_hub'
@@ -379,6 +391,133 @@ class CostExplorerIntegration:
             handle_optimization_error(e, self.console)
             
         return recommendations
+    
+    def _extract_resource_name(self, rec: Dict[str, Any]) -> str:
+        """Extract meaningful resource name from Cost Optimization Hub recommendation"""
+        # Try to get name from tags first
+        tags = rec.get('tags', [])
+        for tag in tags:
+            if tag.get('key', '').lower() == 'name':
+                return tag.get('value', '')
+        
+        # Fall back to resource ID or summary
+        resource_id = rec.get('resourceId', '')
+        if resource_id and resource_id != 'unknown':
+            return resource_id
+        
+        # Use current resource summary if available
+        current_summary = rec.get('currentResourceSummary', '')
+        if current_summary:
+            return current_summary
+        
+        return 'Unknown Resource'
+    
+    def _map_implementation_effort_to_confidence(self, effort: str) -> str:
+        """Map Cost Optimization Hub implementation effort to confidence level"""
+        effort_mapping = {
+            'VeryLow': 'HIGH',
+            'Low': 'HIGH', 
+            'Medium': 'MEDIUM',
+            'High': 'MEDIUM',
+            'VeryHigh': 'LOW'
+        }
+        return effort_mapping.get(effort, 'MEDIUM')
+    
+    def _map_resource_type_to_service(self, resource_type: str) -> str:
+        """Map Cost Optimization Hub resource type to service name"""
+        type_mapping = {
+            'Ec2Instance': 'EC2',
+            'Ec2AutoScalingGroup': 'Auto Scaling',
+            'RdsDbInstance': 'RDS',
+            'ComputeSavingsPlans': 'Savings Plans',
+            'RdsReservedInstances': 'RDS Reserved Instances',
+            'EbsVolume': 'EBS',
+            'LambdaFunction': 'Lambda'
+        }
+        return type_mapping.get(resource_type, 'Cost Optimization Hub')
+    
+    def _format_resource_type(self, resource_type: str) -> str:
+        """Format resource type for display"""
+        type_mapping = {
+            'Ec2Instance': 'EC2 Instance',
+            'Ec2AutoScalingGroup': 'Auto Scaling Group',
+            'RdsDbInstance': 'RDS Database',
+            'ComputeSavingsPlans': 'Compute Savings Plan',
+            'RdsReservedInstances': 'RDS Reserved Instance',
+            'EbsVolume': 'EBS Volume',
+            'LambdaFunction': 'Lambda Function'
+        }
+        return type_mapping.get(resource_type, resource_type)
+    
+    def _create_coh_description(self, rec: Dict[str, Any], resource_name: str) -> str:
+        """Create meaningful description for Cost Optimization Hub recommendation"""
+        action_type = rec.get('actionType', 'optimization')
+        current_summary = rec.get('currentResourceSummary', '')
+        recommended_summary = rec.get('recommendedResourceSummary', '')
+        savings_percentage = rec.get('estimatedSavingsPercentage', 0)
+        
+        if action_type == 'MigrateToGraviton':
+            return f"{resource_name}: Migrate from {current_summary} to {recommended_summary} (Graviton) - {savings_percentage}% savings"
+        elif action_type == 'PurchaseSavingsPlans':
+            return f"Purchase Compute Savings Plan: {recommended_summary} - {savings_percentage}% savings"
+        elif action_type == 'PurchaseReservedInstances':
+            return f"Purchase Reserved Instance: {recommended_summary} - {savings_percentage}% savings"
+        elif action_type == 'Rightsize':
+            return f"{resource_name}: Rightsize from {current_summary} to {recommended_summary} - {savings_percentage}% savings"
+        else:
+            return f"{resource_name}: {action_type} optimization - {savings_percentage}% savings"
+    
+    def _create_coh_remediation_steps(self, rec: Dict[str, Any], resource_name: str) -> List[str]:
+        """Create specific remediation steps for Cost Optimization Hub recommendation"""
+        action_type = rec.get('actionType', 'optimization')
+        resource_type = rec.get('currentResourceType', '')
+        implementation_effort = rec.get('implementationEffort', 'Medium')
+        restart_needed = rec.get('restartNeeded', False)
+        
+        steps = []
+        
+        if action_type == 'MigrateToGraviton':
+            steps = [
+                f"Review current performance metrics for {resource_name}",
+                f"Test workload compatibility with Graviton processors",
+                f"Plan maintenance window for migration" + (" (restart required)" if restart_needed else ""),
+                f"Update instance type to {rec.get('recommendedResourceSummary', 'Graviton-based')}",
+                "Monitor performance and cost impact for 7-14 days"
+            ]
+        elif action_type == 'PurchaseSavingsPlans':
+            steps = [
+                "Review historical usage patterns to confirm commitment level",
+                f"Purchase {rec.get('recommendedResourceSummary', 'Compute Savings Plan')}",
+                "Set up billing alerts for Savings Plan utilization",
+                "Monitor utilization monthly to ensure optimal coverage"
+            ]
+        elif action_type == 'PurchaseReservedInstances':
+            steps = [
+                "Analyze current usage patterns to confirm RI commitment",
+                f"Purchase {rec.get('recommendedResourceSummary', 'Reserved Instance')}",
+                "Set up RI utilization monitoring",
+                "Review RI coverage quarterly for optimization opportunities"
+            ]
+        elif action_type == 'Rightsize':
+            steps = [
+                f"Analyze {resource_name} utilization over past 30 days",
+                f"Test workload on {rec.get('recommendedResourceSummary', 'recommended size')}",
+                f"Schedule maintenance window for resizing" + (" (restart required)" if restart_needed else ""),
+                "Monitor performance after change for 48-72 hours"
+            ]
+        else:
+            steps = [
+                f"Review detailed recommendation for {resource_name} in AWS Cost Optimization Hub",
+                f"Plan implementation considering {implementation_effort.lower()} effort level",
+                "Implement the optimization during appropriate maintenance window",
+                "Monitor cost and performance impact for 1-2 weeks"
+            ]
+        
+        # Add effort level context
+        if implementation_effort in ['High', 'VeryHigh']:
+            steps.append(f"Note: This is a {implementation_effort.lower()} effort change - plan accordingly")
+        
+        return steps
     
     async def get_all_recommendations(self) -> List[OptimizationRecommendation]:
         """Get all Cost Explorer recommendations"""
