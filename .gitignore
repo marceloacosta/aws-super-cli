@@ -238,3 +238,6 @@ internal-*
 *-tokens*
 token*
 secret*
+
+# Feature planning and internal documentation
+new_features.md
