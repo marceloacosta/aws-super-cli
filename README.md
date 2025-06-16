@@ -9,7 +9,7 @@ AWS Super CLI is a command-line tool for AWS security auditing, resource discove
 1. **AWS security misconfigurations**: Comprehensive security auditing across S3, IAM, and network infrastructure with professional export capabilities
 2. **Multi-account complexity**: Smart account categorization, health monitoring, and unified management
 3. **ARN complexity**: Human-readable ARN display with smart truncation and explanation capabilities
-4. **Service-level cost intelligence**: Get detailed cost analysis with credit allocation per service
+4. **Cost optimization**: Comprehensive cost analysis with rightsizing recommendations, Savings Plans analysis, and Reserved Instance optimization
 
 Unlike other tools that focus on single concerns, AWS Super CLI provides enterprise-grade security auditing with advanced multi-account management and cost analysis in one unified interface.
 
@@ -19,6 +19,7 @@ Unlike other tools that focus on single concerns, AWS Super CLI provides enterpr
 - **Network security auditing** - Detect SSH/RDP open to world, overly permissive security groups
 - **Professional Security Reports** - Export findings to CSV, TXT, HTML, and enhanced HTML with executive summaries for compliance and reporting
 - **Service-level credit usage analysis** - See exactly which AWS services consume promotional credits
+- **Cost optimization recommendations** - Rightsizing, Savings Plans, Reserved Instances, and Cost Optimization Hub integration
 - **Multi-account security posture** - Unified security scoring across AWS organizations
 
 ## Installation
@@ -41,6 +42,9 @@ aws-super-cli audit --all-accounts --export enhanced-html -o security-report.htm
 
 # List EC2 instances across all accounts  
 aws-super-cli ls ec2 --all-accounts
+
+# Get comprehensive cost analysis with optimization recommendations
+aws-super-cli cost-snapshot
 
 # Get cost summary with credit analysis
 aws-super-cli cost summary
@@ -154,6 +158,76 @@ aws-super-cli explain arn:aws:iam::123456789012:user/john-doe
 └────────────┴────────────────────┴─────────────────────────────────────────────────────────────┘
 
 Human-readable name: john-doe
+```
+
+## Cost Optimization
+
+AWS Super CLI provides comprehensive cost optimization analysis across multiple AWS services:
+
+### Cost Optimization Commands
+
+```bash
+# Comprehensive cost analysis with optimization recommendations
+aws-super-cli cost-snapshot                    # 7-day analysis with recommendations
+aws-super-cli cost-snapshot --days 30          # 30-day analysis
+aws-super-cli cost-snapshot --export json      # Export detailed data
+
+# Service-specific optimization recommendations
+aws-super-cli optimization-recommendations                           # All services
+aws-super-cli optimization-recommendations --service cost-explorer   # Cost Explorer only
+aws-super-cli optimization-recommendations --service trusted-advisor # Trusted Advisor only
+aws-super-cli optimization-recommendations --service compute-optimizer # Compute Optimizer only
+
+# Check optimization service availability
+aws-super-cli optimization-readiness           # Verify service access and permissions
+```
+
+### Cost Optimization Features
+
+**Cost Explorer Integration:**
+- Current spend analysis with service-level breakdown
+- Rightsizing recommendations for EC2 instances with potential savings
+- Savings Plans purchase recommendations with ROI analysis
+- Reserved Instance recommendations with multi-year projections
+- Billing credits tracking and expiry management
+- Cost Optimization Hub integration for comprehensive recommendations
+
+**Trusted Advisor Integration:**
+- Cost optimization checks from AWS Support
+- Idle resource identification (EC2, RDS, ELB)
+- Underutilized resource recommendations
+- Reserved Instance optimization suggestions
+
+**Compute Optimizer Integration:**
+- EC2 instance rightsizing with performance risk assessment
+- Auto Scaling group optimization recommendations
+- EBS volume optimization suggestions
+- Lambda function memory optimization
+
+### Example Cost Optimization Output
+
+```
+Cost Analysis & Optimization Recommendations (Last 7 Days)
+
+                                    Current Spend by Service                                     
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Service                    ┃ Cost (USD)     ┃ Percentage     ┃ Change vs Previous Period      ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Amazon Elastic Compute... │ $245.67        │ 45.2%          │ +12.3% ↗                      │
+│ Amazon Simple Storage...  │ $89.23         │ 16.4%          │ -2.1% ↘                       │
+│ Amazon Relational Data... │ $67.45         │ 12.4%          │ +5.7% ↗                       │
+└────────────────────────────┴────────────────┴────────────────┴────────────────────────────────┘
+
+                                 Optimization Recommendations                                  
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Service           ┃ Recommendation Type    ┃ Potential Savings  ┃ Confidence ┃ Resources Affected ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━┩
+│ Cost Explorer     │ EC2 Rightsizing       │ $63.52/month       │ High       │ 3 instances        │
+│ Trusted Advisor   │ Idle Load Balancers   │ $18.00/month       │ High       │ 1 load balancer    │
+│ Compute Optimizer │ Instance Optimization │ $45.20/month       │ Medium     │ 5 instances        │
+└───────────────────┴────────────────────────┴────────────────────┴────────────┴────────────────────┘
+
+Total Potential Monthly Savings: $126.72
 ```
 
 ## Security Auditing
@@ -445,7 +519,7 @@ aws-super-cli ls iam --accounts "prod-*" --iam-type users
 aws-super-cli ls rds --engine postgres --all-accounts
 ```
 
-**Cost analysis:**
+**Cost analysis & optimization:**
 ```bash
 # Monthly financial review
 aws-super-cli cost summary
@@ -459,6 +533,20 @@ aws-super-cli cost daily --days 30
 
 # Multi-account cost breakdown
 aws-super-cli cost by-account
+
+# Comprehensive cost analysis with optimization recommendations
+aws-super-cli cost-snapshot                    # 7-day cost analysis with recommendations
+aws-super-cli cost-snapshot --days 30          # 30-day analysis
+aws-super-cli cost-snapshot --export json      # Export to JSON/CSV
+
+# Cost optimization recommendations
+aws-super-cli optimization-recommendations     # All optimization services
+aws-super-cli optimization-recommendations --service cost-explorer  # Cost Explorer only
+aws-super-cli optimization-recommendations --service trusted-advisor # Trusted Advisor only
+aws-super-cli optimization-recommendations --service compute-optimizer # Compute Optimizer only
+
+# Optimization readiness check
+aws-super-cli optimization-readiness           # Check service availability
 ```
 
 ## Why AWS Super CLI?
@@ -472,10 +560,11 @@ aws-super-cli cost by-account
 | Multi-account queries | Manual switching | Automatic parallel | Varies |
 | Output format | JSON only | Rich tables | Varies |
 | Cost analysis | None | Advanced | Basic |
+| Cost optimization | None | Comprehensive | Limited |
 | Credit tracking | None | Service-level | None |
 | Setup complexity | Medium | Zero config | High |
 
-**AWS Super CLI is the only tool that provides comprehensive account management, ARN utilities, and security auditing with service-level credit usage analysis.**
+**AWS Super CLI is the only tool that provides comprehensive account management, ARN utilities, security auditing, and advanced cost optimization with rightsizing recommendations.**
 
 ## Technical Details
 
@@ -515,7 +604,8 @@ Supports:
 - Permissions:
   - **Security auditing**: `ec2:Describe*`, `s3:GetBucket*`, `s3:GetPublicAccessBlock`, `iam:List*`, `iam:Get*`
   - **Resource listing**: `ec2:Describe*`, `s3:List*`, `rds:Describe*`, `lambda:List*`, `elasticloadbalancing:Describe*`, `iam:List*`, `sts:GetCallerIdentity`
-  - **Cost analysis**: `ce:GetCostAndUsage`, `ce:GetDimensionValues`
+  - **Cost analysis**: `ce:GetCostAndUsage`, `ce:GetDimensionValues`, `ce:GetRightsizingRecommendation`, `ce:GetSavingsPlansUtilization`, `ce:GetReservationUtilization`
+  - **Cost optimization**: `support:DescribeTrustedAdvisorChecks`, `compute-optimizer:GetEC2InstanceRecommendations`, `cost-optimization-hub:ListRecommendations`
 
 ## API Costs
 
