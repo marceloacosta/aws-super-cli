@@ -1958,6 +1958,74 @@ def optimization_recommendations(
     asyncio.run(get_recommendations())
 
 
+@app.command(name="executive-report", help="Generate professional HTML report for executive presentation")
+def executive_report(
+    days: int = typer.Option(30, "--days", help="Number of days for cost analysis"),
+    title: str = typer.Option("AWS Cost Optimization Executive Report", "--title", help="Report title"),
+):
+    """Generate professional HTML report for CFO/executive presentation"""
+    from .services.cost_optimization import cost_optimization_core
+    from .services.cost_explorer import cost_explorer
+    from .services.report_generator import report_generator
+    
+    async def generate_executive_report():
+        safe_print()
+        safe_print("[bold]AWS Super CLI - Executive Report Generation[/bold]")
+        safe_print()
+        
+        # Get account info
+        account_info = await cost_optimization_core.get_account_info()
+        if account_info.get('account_id') == 'unknown':
+            safe_print("[red]Error: AWS credentials not configured[/red]")
+            safe_print("Run: aws-super-cli optimization-readiness")
+            return
+        
+        safe_print(f"[dim]Account: {account_info.get('account_id')} | Period: {days} days[/dim]")
+        safe_print()
+        
+        try:
+            # Get spend analysis
+            safe_print("[dim]Analyzing current spend...[/dim]")
+            spend_analysis = await cost_explorer.get_current_spend_analysis(days)
+            
+            # Get all optimization recommendations
+            safe_print("[dim]Gathering optimization recommendations...[/dim]")
+            all_recommendations = await cost_explorer.get_all_recommendations()
+            
+            if not all_recommendations:
+                safe_print("[yellow]No optimization recommendations found[/yellow]")
+                safe_print("[dim]This may indicate well-optimized resources or insufficient data[/dim]")
+                return
+            
+            # Generate HTML report
+            safe_print("[dim]Generating executive HTML report...[/dim]")
+            report_path = report_generator.generate_executive_report(
+                recommendations=all_recommendations,
+                spend_analysis=spend_analysis,
+                account_info=account_info,
+                report_title=title
+            )
+            
+            # Calculate summary metrics
+            total_savings = sum(rec.estimated_savings for rec in all_recommendations)
+            
+            safe_print()
+            safe_print("[bold green]Executive Report Generated Successfully![/bold green]")
+            safe_print()
+            safe_print(f"[bold]Report Location:[/bold] {report_path}")
+            safe_print(f"[bold]Total Recommendations:[/bold] {len(all_recommendations)}")
+            safe_print(f"[bold]Potential Monthly Savings:[/bold] ${total_savings:.2f}")
+            safe_print(f"[bold]Potential Annual Savings:[/bold] ${total_savings * 12:.2f}")
+            safe_print()
+            safe_print("[dim]The report is ready for CFO/executive presentation.[/dim]")
+            safe_print("[dim]Open the HTML file in your browser or print to PDF.[/dim]")
+            
+        except Exception as e:
+            safe_print(f"[red]Error generating executive report: {e}[/red]")
+    
+    asyncio.run(generate_executive_report())
+
+
 @app.command(name="cost-snapshot", help="Generate comprehensive cost analysis and optimization snapshot")
 def cost_snapshot(
     days: int = typer.Option(30, "--days", help="Number of days for cost analysis"),
