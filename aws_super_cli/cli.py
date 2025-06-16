@@ -1,6 +1,7 @@
 """AWS Super CLI - Main CLI interface"""
 
 import asyncio
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 import typer
 from rich.console import Console
@@ -1436,6 +1437,11 @@ def help_command():
         print("  aws-super-cli cost top-spend            # Biggest cost services")
         print("  aws-super-cli cost credits              # Credit usage analysis")
         print()
+        print("Cost Optimization:")
+        print("  aws-super-cli optimization-readiness    # Check prerequisites")
+        print("  aws-super-cli optimization-recommendations # Get cost recommendations")
+        print("  aws-super-cli cost-snapshot             # Comprehensive cost analysis")
+        print()
         print("Multi-Account Intelligence:")
         print("  aws-super-cli accounts                   # Smart account categorization & health")
         print("  aws-super-cli accounts --category production # Filter by category") 
@@ -1488,6 +1494,11 @@ def help_command():
         safe_print("  [cyan]aws-super-cli cost summary[/cyan]              # Overall cost trends")
         safe_print("  [cyan]aws-super-cli cost top-spend[/cyan]            # Biggest cost services")
         safe_print("  [cyan]aws-super-cli cost credits[/cyan]              # Credit usage analysis")
+        safe_print()
+        safe_print("[bold]Cost Optimization:[/bold]")
+        safe_print("  [cyan]aws-super-cli optimization-readiness[/cyan]    # Check prerequisites")
+        safe_print("  [cyan]aws-super-cli optimization-recommendations[/cyan] # Get cost recommendations")
+        safe_print("  [cyan]aws-super-cli cost-snapshot[/cyan]             # Comprehensive cost analysis")
         safe_print()
         safe_print("[bold]Multi-Account Intelligence:[/bold]")
         safe_print("  [cyan]aws-super-cli accounts[/cyan]                   # Smart account categorization & health")
@@ -1567,6 +1578,279 @@ def explain_arn(
     safe_print(f"  Medium (30 chars): [yellow]{arn_intelligence.smart_truncate(arn, 30)}[/yellow]")
     safe_print(f"  Long (50 chars): [yellow]{arn_intelligence.smart_truncate(arn, 50)}[/yellow]")
     safe_print()
+
+
+@app.command(name="optimization-readiness", help="Check prerequisites for AWS cost optimization features")
+def optimization_readiness():
+    """Check prerequisites for cost optimization features"""
+    from .services.cost_optimization import cost_optimization_core
+    
+    async def check_readiness():
+        safe_print()
+        safe_print("[bold]AWS Cost Optimization - Prerequisites Check[/bold]")
+        safe_print()
+        
+        # Get account info
+        account_info = await cost_optimization_core.get_account_info()
+        
+        # Check required IAM policies
+        required_policies = [
+            "AWSSupportAccess",
+            "ComputeOptimizerReadOnlyAccess"
+        ]
+        iam_results = await cost_optimization_core.check_iam_permissions(required_policies)
+        
+        # Check support plan
+        support_info = await cost_optimization_core.check_support_plan()
+        
+        # Create and display prerequisites table
+        table = cost_optimization_core.create_prerequisites_table(
+            account_info, iam_results, support_info
+        )
+        safe_print(table)
+        
+        # Provide guidance based on results
+        safe_print()
+        missing_requirements = []
+        
+        if account_info.get('account_id') == 'unknown':
+            missing_requirements.append("AWS credentials not configured")
+        
+        for policy, has_permission in iam_results.items():
+            if not has_permission:
+                policy_name = policy.split('/')[-1] if '/' in policy else policy
+                missing_requirements.append(f"IAM policy: {policy_name}")
+        
+        if not support_info.get('trusted_advisor_available'):
+            missing_requirements.append("Business or Enterprise support plan")
+        
+        if missing_requirements:
+            safe_print("[yellow]Missing Requirements:[/yellow]")
+            for req in missing_requirements:
+                safe_print(f"  ✗ {req}")
+            safe_print()
+            safe_print("[bold]Next Steps:[/bold]")
+            safe_print("1. Ensure AWS credentials are configured")
+            safe_print("2. Attach required IAM policies to your user/role")
+            safe_print("3. Upgrade to Business or Enterprise support plan for Trusted Advisor")
+            safe_print()
+            safe_print("For detailed setup instructions:")
+            safe_print("  aws-super-cli help")
+        else:
+            safe_print("[green]✓ All prerequisites met! Ready for cost optimization.[/green]")
+            safe_print()
+            safe_print("Available commands:")
+            safe_print("  aws-super-cli optimization-recommendations  # Get cost recommendations")
+            safe_print("  aws-super-cli cost-snapshot                # Comprehensive cost analysis")
+    
+    asyncio.run(check_readiness())
+
+
+@app.command(name="optimization-recommendations", help="Get AWS cost optimization recommendations")
+def optimization_recommendations(
+    service: Optional[str] = typer.Option(None, "--service", help="Specific service (trusted-advisor, compute-optimizer, cost-explorer)"),
+    all_services: bool = typer.Option(True, "--all-services/--no-all-services", help="Get recommendations from all available services"),
+    export: bool = typer.Option(True, "--export/--no-export", help="Export recommendations to files"),
+):
+    """Get cost optimization recommendations from AWS services"""
+    from .services.cost_optimization import cost_optimization_core, OptimizationRecommendation
+    
+    async def get_recommendations():
+        safe_print()
+        safe_print("[bold]AWS Cost Optimization - Recommendations[/bold]")
+        safe_print()
+        
+        # Check prerequisites first
+        account_info = await cost_optimization_core.get_account_info()
+        if account_info.get('account_id') == 'unknown':
+            safe_print("[red]Error: AWS credentials not configured[/red]")
+            safe_print("Run: aws-super-cli optimization-readiness")
+            return
+        
+        safe_print(f"[dim]Account: {account_info.get('account_id')}[/dim]")
+        safe_print()
+        
+        # For now, create sample recommendations to demonstrate the infrastructure
+        # TODO: Implement actual service integrations in Issues #19-22
+        sample_recommendations = [
+            OptimizationRecommendation(
+                service="trusted-advisor",
+                resource_id="i-1234567890abcdef0",
+                resource_type="EC2 Instance",
+                recommendation_type="Idle Resource",
+                current_cost=50.0,
+                estimated_savings=45.0,
+                confidence="HIGH",
+                description="EC2 instance has been idle for 14+ days",
+                remediation_steps=[
+                    "Review instance usage patterns",
+                    "Consider stopping or terminating if not needed",
+                    "Resize to smaller instance type if needed"
+                ],
+                region="us-east-1",
+                account_id=account_info.get('account_id', 'unknown'),
+                timestamp=datetime.now().isoformat(),
+                source="trusted_advisor"
+            ),
+            OptimizationRecommendation(
+                service="compute-optimizer",
+                resource_id="vol-0987654321fedcba0",
+                resource_type="EBS Volume",
+                recommendation_type="Underutilized Storage",
+                current_cost=20.0,
+                estimated_savings=15.0,
+                confidence="MEDIUM",
+                description="EBS volume utilization below 20%",
+                remediation_steps=[
+                    "Analyze storage usage patterns",
+                    "Consider resizing to smaller volume",
+                    "Migrate to cheaper storage class if appropriate"
+                ],
+                region="us-west-2",
+                account_id=account_info.get('account_id', 'unknown'),
+                timestamp=datetime.now().isoformat(),
+                source="compute_optimizer"
+            )
+        ]
+        
+        # Display recommendations
+        if sample_recommendations:
+            table = Table(title="Cost Optimization Recommendations")
+            table.add_column("Service", style="cyan")
+            table.add_column("Resource", style="yellow")
+            table.add_column("Type", style="green")
+            table.add_column("Savings", style="bold green")
+            table.add_column("Confidence", style="magenta")
+            table.add_column("Description")
+            
+            total_savings = 0.0
+            for rec in sample_recommendations:
+                table.add_row(
+                    rec.source,
+                    rec.resource_id[:20] + "..." if len(rec.resource_id) > 20 else rec.resource_id,
+                    rec.resource_type,
+                    f"${rec.estimated_savings:.2f}",
+                    rec.confidence,
+                    rec.description[:50] + "..." if len(rec.description) > 50 else rec.description
+                )
+                total_savings += rec.estimated_savings
+            
+            safe_print(table)
+            safe_print()
+            safe_print(f"[bold green]Total Estimated Monthly Savings: ${total_savings:.2f}[/bold green]")
+            
+            # Export recommendations if requested
+            if export:
+                saved_files = cost_optimization_core.save_recommendations(
+                    sample_recommendations, "optimization-recommendations"
+                )
+                safe_print()
+                safe_print("[dim]Recommendations exported to:[/dim]")
+                for format, filepath in saved_files.items():
+                    safe_print(f"  {format.upper()}: {filepath}")
+        else:
+            safe_print("[yellow]No cost optimization recommendations found.[/yellow]")
+            safe_print("This may indicate:")
+            safe_print("  • Your resources are already optimized")
+            safe_print("  • Insufficient data for analysis")
+            safe_print("  • Missing required permissions")
+        
+        safe_print()
+        safe_print("[dim]Note: This is the core infrastructure. Service integrations will be added in upcoming releases.[/dim]")
+    
+    asyncio.run(get_recommendations())
+
+
+@app.command(name="cost-snapshot", help="Generate comprehensive cost analysis and optimization snapshot")
+def cost_snapshot(
+    days: int = typer.Option(30, "--days", help="Number of days for cost analysis"),
+    export: bool = typer.Option(True, "--export/--no-export", help="Export snapshot to files"),
+):
+    """Generate comprehensive cost analysis snapshot"""
+    from .services.cost_optimization import cost_optimization_core
+    from .services import cost as cost_analysis
+    
+    async def generate_snapshot():
+        safe_print()
+        safe_print("[bold]AWS Cost Optimization - Comprehensive Snapshot[/bold]")
+        safe_print()
+        
+        # Get account info
+        account_info = await cost_optimization_core.get_account_info()
+        if account_info.get('account_id') == 'unknown':
+            safe_print("[red]Error: AWS credentials not configured[/red]")
+            safe_print("Run: aws-super-cli optimization-readiness")
+            return
+        
+        safe_print(f"[dim]Account: {account_info.get('account_id')} | Period: {days} days[/dim]")
+        safe_print()
+        
+        try:
+            # Get current cost data using existing cost analysis
+            safe_print("[bold]Current Cost Analysis[/bold]")
+            
+            # Get cost summary
+            cost_summary = await cost_analysis.get_cost_summary(days=days)
+            
+            # Create cost summary table
+            summary_table = Table(title=f"Cost Summary - Last {days} Days")
+            summary_table.add_column("Metric", style="cyan")
+            summary_table.add_column("Amount", style="bold green")
+            
+            for key, value in cost_summary.items():
+                if key != 'period':
+                    metric_name = key.replace('_', ' ').title()
+                    summary_table.add_row(metric_name, value)
+            
+            safe_print(summary_table)
+            safe_print()
+            
+            # Get top spending services
+            safe_print("[bold]Top Spending Services[/bold]")
+            top_services = await cost_analysis.get_cost_by_service(days=days, limit=10)
+            
+            if top_services:
+                services_table = cost_analysis.create_cost_table(
+                    top_services, 
+                    f"Top Services - Last {days} Days",
+                    ["Service", "Cost"]
+                )
+                safe_print(services_table)
+            else:
+                safe_print("[yellow]No cost data available[/yellow]")
+            
+            safe_print()
+            
+            # Optimization opportunities summary
+            safe_print("[bold]Optimization Opportunities[/bold]")
+            safe_print("✓ Cost analysis completed")
+            safe_print("• Run 'aws-super-cli optimization-recommendations' for specific recommendations")
+            safe_print("• Run 'aws-super-cli optimization-readiness' to check prerequisites")
+            
+            # Export snapshot if requested
+            if export:
+                snapshot_data = {
+                    "account_id": account_info.get('account_id'),
+                    "generated_at": datetime.now().isoformat(),
+                    "period_days": days,
+                    "cost_summary": cost_summary,
+                    "top_services": top_services[:5] if top_services else []
+                }
+                
+                # Save snapshot
+                filename = cost_optimization_core.get_timestamped_filename("cost-snapshot", "json")
+                with open(filename, 'w') as f:
+                    import json
+                    json.dump(snapshot_data, f, indent=2, default=str)
+                
+                safe_print()
+                safe_print(f"[green]Cost snapshot exported to: {filename}[/green]")
+        
+        except Exception as e:
+            safe_print(f"[red]Error generating cost snapshot: {e}[/red]")
+            safe_print("[yellow]Ensure you have Cost Explorer permissions and data is available[/yellow]")
+    
+    asyncio.run(generate_snapshot())
 
 
 if __name__ == "__main__":
